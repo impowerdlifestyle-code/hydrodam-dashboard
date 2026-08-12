@@ -6,7 +6,7 @@ import { useState } from "react";
 import { NAV } from "@/lib/data";
 import { Icon } from "@/components/Icon";
 
-export function Sidebar() {
+export function Sidebar({ badges = {} }: { badges?: Record<string, number> }) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -18,20 +18,24 @@ export function Sidebar() {
   }
 
   const nav = (
-    <nav className="flex flex-col gap-1">
+    <nav className="flex flex-col gap-0.5">
       {NAV.map((item) => {
         const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+        const count = badges[item.href];
         return (
           <Link
             key={item.href}
             href={item.href}
             onClick={() => setOpen(false)}
-            className={`flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm transition-colors ${
+            className={`flex items-center gap-3 rounded-xl px-3.5 py-2 text-sm transition-colors ${
               active ? "bg-teal/15 font-semibold text-ink ring-1 ring-line-bright" : "text-ink-dim hover:bg-white/5 hover:text-ink"
             }`}
           >
-            <Icon name={item.icon} className={active ? "text-teal" : ""} />
-            {item.label}
+            <Icon name={item.icon} size={17} className={active ? "text-teal" : ""} />
+            <span className="flex-1">{item.label}</span>
+            {count ? (
+              <span className="rounded-full bg-ember/20 px-1.5 py-0.5 font-mono text-[10px] font-bold text-ember">{count}</span>
+            ) : null}
           </Link>
         );
       })}
@@ -52,9 +56,12 @@ export function Sidebar() {
       {/* desktop sidebar */}
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-line bg-abyss-2/40 p-4 lg:flex">
         <Brand />
-        <div className="mt-6 flex-1">{nav}</div>
-        <button onClick={logout} className="flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm text-ink-faint transition-colors hover:bg-white/5 hover:text-ink">
-          <Icon name="logout" /> Sign out
+        <div className="mt-5 flex-1 overflow-y-auto">{nav}</div>
+        <Link href="/field" className="flex items-center gap-3 rounded-xl px-3.5 py-2 text-sm text-ink-faint transition-colors hover:bg-white/5 hover:text-ink">
+          <Icon name="truck" size={17} /> Field app
+        </Link>
+        <button onClick={logout} className="flex items-center gap-3 rounded-xl px-3.5 py-2 text-sm text-ink-faint transition-colors hover:bg-white/5 hover:text-ink">
+          <Icon name="logout" size={17} /> Sign out
         </button>
       </aside>
     </>

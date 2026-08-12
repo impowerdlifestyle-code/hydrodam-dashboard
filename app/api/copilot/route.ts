@@ -1,51 +1,118 @@
-import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { getCrmSummary, fmtUSD } from "@/lib/hubspot";
-import { SOPS, WORKFLOWS } from "@/lib/data";
+import {
+  arAging, clientName, db, jobCosting, metrics, sourcePerformance, todaysVisits,
+} from "@/lib/db";
+import { money, shortDate, timeRange } from "@/lib/format";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
 type Msg = { role: "user" | "assistant"; content: string };
 
+/** The operating picture the model answers from. */
+function context(): string {
+  const d = db();
+  const m = metrics();
+  const today = new Date().toISOString().slice(0, 10);
+
+  const lines: string[] = [];
+  lines.push(`Today is ${today}. Data source: ${process.env.SUPABASE_URL ? "live Postgres" : "seeded demo data"}.`);
+  lines.push(
+    `METRICS — open pipeline ${money(m.openPipelineCents)} across ${m.openQuoteCount} quotes; ` +
+    `won this month ${money(m.wonThisMonthCents)}; close rate ${m.closeRatePct}%; ` +
+    `average ticket ${money(m.avgTicketCents)}; outstanding ${money(m.outstandingCents)} ` +
+    `(${money(m.overdueCents)} overdue across ${m.overdueCount}); active jobs ${m.activeJobs}; ` +
+    `${m.unassignedRequests} unworked requests; ${m.unreadMessages} unread messages.`
+  );
+
+  lines.push(
+    "TODAY: " + (todaysVisits().map((v) =>
+      `${timeRange(v.scheduledStart, v.scheduledEnd)} ${clientName(v.clientId)} (${v.kind}, ${v.status})`
+    ).join("; ") || "nothing scheduled")
+  );
+
+  lines.push(
+    "REQUESTS: " + d.requests.map((r) =>
+      `#${r.number} ${clientName(r.clientId)} — ${r.status}, ${r.source}${r.firstResponseAt ? "" : ", NO REPLY YET"}`
+    ).join("; ")
+  );
+
+  lines.push(
+    "QUOTES: " + d.quotes.map((q) =>
+      `#${q.number} ${clientName(q.clientId)} ${money(q.totalCents)} ${q.primarySeries} — ${q.status}, valid to ${q.validUntil}`
+    ).join("; ")
+  );
+
+  lines.push(
+    "JOBS: " + d.jobs.map((j) => {
+      const c = jobCosting(j.id);
+      return `#${j.number} ${clientName(j.clientId)} ${money(j.contractCents)} — ${j.status}, fabrication ${j.fabricationStatus}, margin ${(c.marginBps / 100).toFixed(0)}%`;
+    }).join("; ")
+  );
+
+  lines.push(
+    "INVOICES: " + d.invoices.map((i) =>
+      `#${i.number} ${clientName(i.clientId)} ${money(i.totalCents)} ${i.status}, balance ${money(i.totalCents - i.amountPaidCents)}, due ${shortDate(i.dueDate)}`
+    ).join("; ")
+  );
+
+  lines.push("AR AGING: " + arAging().map((a) => `${a.bucket} ${money(a.cents)} (${a.count})`).join("; "));
+  lines.push("LEAD SOURCES: " + sourcePerformance().map((s) => `${s.source} ${s.leads} leads, ${money(s.wonCents)} won`).join("; "));
+
+  lines.push(
+    "AUTOMATIONS: " + d.automations.map((a) =>
+      `${a.name} — ${a.armed ? "armed" : "DRY RUN"}, ${a.sentLast30d} sent in 30d`
+    ).join("; ")
+  );
+
+  lines.push(
+    "CONSENT: " + d.clients.filter((c) => !c.smsConsent).map((c) => c.name).join(", ") + " have NOT consented to marketing SMS."
+  );
+
+  return lines.join("\n");
+}
+
+const SYSTEM = `You are the Copilot inside HydroDam Ops, the operating system for HydroDam — an aluminum flood-barrier contractor in Clearwater, Florida. Jobs run $2,900 to $90,000 and are sold by opening: each door, garage or slider gets a width, a protection height and a plank count, in one of three series (Sentinel, Onyx, and Titanium which is quote-only and never auto-priced).
+
+You help the owner and office staff run the day: triage requests, chase quotes, protect margin, spot invoices going stale, and prioritise. Be concise, specific and numerate — lead with the number, then the action. Never invent a price, a client or a date that isn't in the snapshot; if something isn't there, say so. Never suggest texting a client who hasn't consented to marketing SMS. No markdown headers.`;
+
+function fallback(): string {
+  const m = metrics();
+  const d = db();
+  const biggest = [...d.quotes]
+    .filter((q) => ["sent", "viewed"].includes(q.status))
+    .sort((a, b) => b.totalCents - a.totalCents)[0];
+  return (
+    `Open pipeline is ${money(m.openPipelineCents)} across ${m.openQuoteCount} quotes, close rate ${m.closeRatePct}%. ` +
+    `${m.overdueCount} invoice${m.overdueCount === 1 ? "" : "s"} overdue for ${money(m.overdueCents)}. ` +
+    (biggest ? `Biggest live quote: #${biggest.number}, ${clientName(biggest.clientId)}, ${money(biggest.totalCents)}. ` : "") +
+    `${m.unassignedRequests} request${m.unassignedRequests === 1 ? "" : "s"} still unworked.\n\n` +
+    `(Add ANTHROPIC_API_KEY to unlock full AI answers.)`
+  );
+}
+
 export async function POST(req: Request) {
-  let messages: Msg[] = [];
   try {
-    ({ messages } = await req.json());
-  } catch {
-    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
-  }
+    const { messages } = (await req.json()) as { messages: Msg[] };
+    const key = process.env.ANTHROPIC_API_KEY;
+    if (!key) return Response.json({ reply: fallback() });
 
-  const crm = await getCrmSummary();
-  const context = [
-    `LIVE CRM SNAPSHOT (${crm.connected ? "HubSpot" : "demo data"}):`,
-    `Open pipeline: ${fmtUSD(crm.metrics.openValue)} across ${crm.metrics.openDeals} deals. Won recently: ${fmtUSD(crm.metrics.wonValue)}. Close rate: ${crm.metrics.closeRate}%. New contacts (30d): ${crm.metrics.newContacts30d}.`,
-    `Open deals: ${crm.deals.map((d) => `${d.name} — ${d.stage} — ${fmtUSD(d.amount)} (close ${d.closeDate ?? "n/a"})`).join("; ")}.`,
-    `Recent contacts: ${crm.contacts.map((c) => `${c.name} (${c.stage ?? "lead"})`).join(", ")}.`,
-    `Active workflows: ${WORKFLOWS.filter((w) => w.status === "live").map((w) => w.name).join(", ")}.`,
-    `SOP topics: ${SOPS.map((s) => s.title).join(", ")}.`,
-  ].join("\n");
-
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json({
-      reply:
-        `Here's where things stand: ${fmtUSD(crm.metrics.openValue)} in open pipeline across ${crm.metrics.openDeals} deals, with a ${crm.metrics.closeRate}% close rate. ` +
-        `Your biggest open deal is ${crm.deals.filter((d) => !/won|lost/i.test(d.stage)).sort((a, b) => b.amount - a.amount)[0]?.name ?? "—"}. ` +
-        `(Add ANTHROPIC_API_KEY to unlock full AI answers, drafting, and analysis.)`,
-    });
-  }
-
-  try {
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const msg = await client.messages.create({
+    const client = new Anthropic({ apiKey: key });
+    const res = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 700,
-      system: `You are the AI Copilot inside HydroDam Ops — the command center for HydroDam, an aluminum flood-barrier company in St. Petersburg, FL. You help the CEO and team run the business: analyze the pipeline, prioritize the day, draft emails/SMS, summarize deals, and answer questions about CRM, calendar, workflows, and SOPs. Be concise, specific, and action-oriented. Use the live CRM snapshot below. When drafting messages, keep them warm and professional. Never invent specific prices beyond what's in the data. No markdown headers.\n\n${context}`,
+      max_tokens: 900,
+      system: `${SYSTEM}\n\nCURRENT SNAPSHOT\n${context()}`,
       messages: messages.slice(-10).map((m) => ({ role: m.role, content: m.content })),
     });
-    const text = msg.content.find((c) => c.type === "text");
-    return NextResponse.json({ reply: text && "text" in text ? text.text : "Sorry, I couldn't generate a response." });
+
+    const reply = res.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("\n")
+      .trim();
+
+    return Response.json({ reply: reply || fallback() });
   } catch {
-    return NextResponse.json({ reply: "I'm having trouble reaching the AI service. Try again in a moment." });
+    return Response.json({ reply: fallback() });
   }
 }

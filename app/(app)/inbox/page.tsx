@@ -1,43 +1,82 @@
-import { PageHeader, Panel, Badge } from "@/components/ui";
+import Link from "next/link";
+import { Badge, EmptyState, PageHeader, Panel, SectionLabel, StatCard } from "@/components/ui";
 import { Icon } from "@/components/Icon";
+import { MESSAGE_TEMPLATES } from "@/lib/data";
+import { clientName, db, messagesFor } from "@/lib/db";
+import { relative } from "@/lib/format";
 
-// Inbox surfaces HubSpot Conversations once the inbox scope is granted on the
-// Private App. Until then this shows the shape with representative threads.
-const THREADS = [
-  { id: "1", from: "David Stern", subject: "Re: Storefront quote — can we expedite?", preview: "We'd like to move before the next system…", when: "12m", unread: true, channel: "email" },
-  { id: "2", from: "Tammy White", subject: "Install scheduling", preview: "Thursday works great for us, thank you!", when: "1h", unread: true, channel: "email" },
-  { id: "3", from: "(727) 555-0142", subject: "SMS", preview: "Is the assessment still free?", when: "2h", unread: false, channel: "sms" },
-  { id: "4", from: "Jennifer Park", subject: "Re: Onyx vs Sentinel", preview: "Does the black finish cost more?", when: "5h", unread: false, channel: "email" },
-];
+export const dynamic = "force-dynamic";
+export const metadata = { title: "Inbox · HydroDam Ops" };
 
 export default function InboxPage() {
+  const d = db();
+  const convs = [...d.conversations].sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
+  const unread = convs.reduce((s, c) => s + c.unreadCount, 0);
+  const outbound30 = d.messages.filter((m) => m.direction === "outbound").length;
+
   return (
     <>
-      <PageHeader
-        title="Inbox"
-        subtitle="Unified email & SMS from HubSpot Conversations."
-        action={<Badge tone="warn"><span className="h-1.5 w-1.5 rounded-full bg-current" />Preview — grant Conversations scope</Badge>}
-      />
-      <Panel className="p-0">
-        <div className="divide-y divide-line">
-          {THREADS.map((t) => (
-            <div key={t.id} className="flex items-start gap-4 p-4 transition-colors hover:bg-white/5">
-              <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${t.unread ? "bg-teal/15 text-teal" : "bg-white/5 text-ink-faint"}`}>
-                <Icon name={t.channel === "sms" ? "phone" : "mail"} size={16} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-3">
-                  <p className={`truncate text-sm ${t.unread ? "font-semibold text-ink" : "text-ink-dim"}`}>{t.from}</p>
-                  <span className="shrink-0 font-mono text-[10px] text-ink-faint">{t.when}</span>
-                </div>
-                <p className="truncate text-sm text-ink">{t.subject}</p>
-                <p className="truncate text-xs text-ink-faint">{t.preview}</p>
-              </div>
-              {t.unread && <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-teal" />}
-            </div>
-          ))}
-        </div>
-      </Panel>
+      <PageHeader title="Inbox" subtitle="Two-way SMS and email, threaded per client." />
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard label="Unread" value={unread} accent={unread ? "ember" : "good"} />
+        <StatCard label="Open threads" value={convs.filter((c) => c.status === "open").length} />
+        <StatCard label="Messages sent" value={outbound30} sub="templates and automations" accent="teal" />
+      </div>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-3">
+        <Panel className="lg:col-span-2">
+          <SectionLabel>Conversations</SectionLabel>
+          {convs.length === 0 ? (
+            <EmptyState icon="mail" title="No conversations" />
+          ) : (
+            <ul className="flex flex-col gap-1.5">
+              {convs.map((c) => {
+                const last = messagesFor(c.id).at(-1);
+                return (
+                  <li key={c.id}>
+                    <Link href={`/inbox/${c.id}`} className="flex items-start gap-3 rounded-xl border border-line/60 p-3 transition-colors hover:border-line-bright">
+                      <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${c.unreadCount ? "bg-ember/15 text-ember" : "bg-teal/10 text-teal"}`}>
+                        <Icon name={c.channel === "sms" ? "phone" : "mail"} size={14} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-baseline justify-between gap-2">
+                          <span className={`truncate text-sm ${c.unreadCount ? "font-bold text-ink" : "font-semibold text-ink-dim"}`}>
+                            {clientName(c.clientId)}
+                          </span>
+                          <span className="shrink-0 font-mono text-[10px] text-ink-faint">{relative(c.lastMessageAt)}</span>
+                        </span>
+                        <span className="mt-0.5 block truncate text-xs text-ink-faint">
+                          {last?.direction === "outbound" && <span className="text-teal">You: </span>}
+                          {last?.body ?? "—"}
+                        </span>
+                      </span>
+                      {c.unreadCount > 0 && (
+                        <span className="mt-1 shrink-0 rounded-full bg-ember px-1.5 py-0.5 font-mono text-[10px] font-bold text-white">{c.unreadCount}</span>
+                      )}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Panel>
+
+        <Panel>
+          <SectionLabel>Templates</SectionLabel>
+          <ul className="flex flex-col gap-2">
+            {MESSAGE_TEMPLATES.map((t) => (
+              <li key={t.key} className="rounded-xl border border-line/60 p-3">
+                <p className="flex items-center justify-between gap-2 text-sm font-semibold text-ink">
+                  {t.name}
+                  <Badge tone={t.channel === "sms" ? "teal" : "neutral"}>{t.channel}</Badge>
+                </p>
+                <p className="mt-1.5 text-xs leading-relaxed text-ink-faint">{t.body}</p>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      </div>
     </>
   );
 }
