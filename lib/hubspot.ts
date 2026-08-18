@@ -1,4 +1,5 @@
 import "server-only";
+import { unstable_cache } from "next/cache";
 import type { Client, Property, ServiceRequest, RequestStatus } from "@/lib/types";
 
 /**
@@ -143,7 +144,18 @@ export type CrmSnapshot = {
   addressedCount: number;
 };
 
-export async function fetchCrm(): Promise<CrmSnapshot | null> {
+/**
+ * Shared across server instances via the Next data cache, not just the
+ * in-process singleton. Without it every cold lambda re-pages the whole CRM and
+ * the first visitor on that instance waits ~17s. Supabase removes the need for
+ * this entirely; until then, one instance pays the cost and the rest read it.
+ */
+export const fetchCrm = unstable_cache(fetchCrmUncached, ["hubspot-crm-snapshot"], {
+  revalidate: 600,
+  tags: ["crm"],
+});
+
+async function fetchCrmUncached(): Promise<CrmSnapshot | null> {
   if (!CRM_LIVE) return null;
 
   // Sequential on purpose — these two share one rate-limit bucket.
