@@ -38,6 +38,8 @@ export type Client = {
   tags: string[];
   createdAt: string;
   hubspotContactId?: string;
+  /** Seeded demo row. Hidden from Clients/Requests once the CRM is connected. */
+  demo?: boolean;
 };
 
 export type Property = {
@@ -77,6 +79,8 @@ export type ServiceRequest = {
   assignedTo?: string;
   createdAt: string;
   firstResponseAt?: string;
+  /** Seeded demo row. Hidden from Clients/Requests once the CRM is connected. */
+  demo?: boolean;
 };
 
 export type QuoteOpening = {

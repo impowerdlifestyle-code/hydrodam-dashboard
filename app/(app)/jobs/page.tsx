@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { EmptyState, PageHeader, Panel, RowLink, StatCard, StatusPill, Table, Td, Th } from "@/components/ui";
+import { DemoNotice, EmptyState, PageHeader, Panel, RowLink, StatCard, StatusPill, Table, Td, Th } from "@/components/ui";
 import { clientName, db, jobCosting, propertyFor } from "@/lib/db";
 import { compactMoney, money, shortDate } from "@/lib/format";
 
@@ -27,6 +27,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
 
   return (
     <>
+      <DemoNotice what="Work orders, visits, materials and time entries." />
       <PageHeader title="Jobs" subtitle="Work orders from fabrication through installation and sign-off." />
 
       <div className="grid gap-4 sm:grid-cols-3">

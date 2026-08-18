@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge, KeyValue, LinkButton, PageHeader, Panel, SectionLabel, StatusPill } from "@/components/ui";
-import { db, getClient, getRequest, propertyFor, staffName } from "@/lib/db";
+import { db, ensureCrm, getClient, getRequest, propertyFor, staffName } from "@/lib/db";
 import { dateTime, money, phoneDisplay, relative } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
+// First render of a cold instance pages ~3,000 HubSpot contacts.
+export const maxDuration = 60;
 
 export default async function RequestDetail({ params }: { params: Promise<{ id: string }> }) {
+  await ensureCrm();
   const { id } = await params;
   const r = getRequest(id);
   if (!r) notFound();

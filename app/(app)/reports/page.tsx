@@ -1,4 +1,4 @@
-import { Bar, Money, PageHeader, Panel, SectionLabel, StatCard, Table, Td, Th } from "@/components/ui";
+import { Bar, DemoNotice, Money, PageHeader, Panel, SectionLabel, StatCard, Table, Td, Th } from "@/components/ui";
 import { arAging, clientName, crewUtilization, db, jobCosting, metrics, revenueByMonth, sourcePerformance } from "@/lib/db";
 import { compactMoney, hoursMinutes, money } from "@/lib/format";
 
@@ -34,6 +34,7 @@ export default function ReportsPage() {
 
   return (
     <>
+      <DemoNotice what="Every figure on this page, including margin by series." />
       <PageHeader title="Reports" subtitle="Where the money comes from, and where it leaks." />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

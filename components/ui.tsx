@@ -285,3 +285,18 @@ export function Bar({ label, value, max, hint }: { label: string; value: number;
     </div>
   );
 }
+
+export function DemoNotice({ what }: { what: string }) {
+  return (
+    <div className="mb-6 flex items-start gap-3 rounded-xl border border-warn/30 bg-warn/[0.06] px-4 py-3">
+      <span className="mt-0.5 shrink-0 text-warn">
+        <Icon name="alert" size={16} />
+      </span>
+      <p className="text-xs leading-relaxed text-ink-dim">
+        <span className="font-semibold text-warn">Demo data.</span> {what} HydroDam has no system of
+        record for this yet — HubSpot holds leads only, and there are no closed-won deals in it. These
+        rows are illustrative and become real once jobs are entered against the database.
+      </p>
+    </div>
+  );
+}

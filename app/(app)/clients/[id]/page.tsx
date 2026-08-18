@@ -5,14 +5,15 @@ import {
 } from "@/components/ui";
 import { JOURNEY } from "@/lib/data";
 import { Stepper } from "@/components/ui";
-import {
-  db, getClient, invoicesFor, jobsFor, openingsFor, propertyFor, quotesFor,
-} from "@/lib/db";
+import { db, ensureCrm, getClient, invoicesFor, jobsFor, openingsFor, propertyFor, quotesFor } from "@/lib/db";
 import { money, phoneDisplay, shortDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
+// First render of a cold instance pages ~3,000 HubSpot contacts.
+export const maxDuration = 60;
 
 export default async function ClientDetail({ params }: { params: Promise<{ id: string }> }) {
+  await ensureCrm();
   const { id } = await params;
   const client = getClient(id);
   if (!client) notFound();

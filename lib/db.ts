@@ -1,5 +1,6 @@
 import "server-only";
 import { buildSeed } from "@/lib/seed";
+import { CRM_LIVE, fetchCrm } from "@/lib/hubspot";
 import type {
   Client, Conversation, Invoice, Job, Message, Opening, Payment, Property, Quote,
   ServiceRequest, Snapshot, Staff, Visit,
@@ -22,9 +23,70 @@ export const DB_LIVE = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_
 let snapshot: Snapshot | null = null;
 
 export function db(): Snapshot {
-  if (!snapshot) snapshot = buildSeed();
+  if (!snapshot) {
+    snapshot = buildSeed();
+    for (const c of snapshot.clients) c.demo = true;
+    for (const r of snapshot.requests) r.demo = true;
+  }
   return snapshot;
 }
+
+// ---------------------------------------------------------------------- CRM
+//
+// HubSpot backs the people half of the app: Clients and Requests. Everything
+// downstream of a measurement — jobs, visits, invoices, materials — has no
+// source system yet and stays on the seeded demo rows until Supabase exists.
+//
+// Contacts are merged into the same snapshot the seed lives in, so every
+// existing lookup keeps working. Seeded people carry `demo: true` and are
+// filtered out of the two live screens; they remain so seeded jobs and invoices
+// can still resolve a client name.
+
+let crmLoadedAt = 0;
+let crmMeta: { contactCount: number; addressedCount: number; fetchedAt: string } | null = null;
+let inFlight: Promise<void> | null = null;
+
+const CRM_TTL_MS = 10 * 60_000;
+
+export const crmStatus = () => ({ live: CRM_LIVE && crmMeta !== null, ...crmMeta });
+
+/**
+ * Hydrates the snapshot from HubSpot. Safe to call on every render — it fetches
+ * at most once per TTL per server instance, and concurrent callers share the
+ * one in-flight request rather than each starting their own.
+ */
+export async function ensureCrm(): Promise<void> {
+  if (!CRM_LIVE) return;
+  if (crmMeta && Date.now() - crmLoadedAt < CRM_TTL_MS) return;
+  if (inFlight) return inFlight;
+
+  inFlight = (async () => {
+    try {
+      const crm = await fetchCrm();
+      if (!crm) return;
+      const d = db();
+      d.clients = [...d.clients.filter((c) => c.demo), ...crm.clients];
+      d.properties = [...d.properties.filter((p) => !p.id.startsWith("hsp_")), ...crm.properties];
+      d.requests = [...d.requests.filter((r) => r.demo), ...crm.requests];
+      crmMeta = {
+        contactCount: crm.contactCount,
+        addressedCount: crm.addressedCount,
+        fetchedAt: crm.fetchedAt,
+      };
+      crmLoadedAt = Date.now();
+    } catch {
+      // A CRM outage must never take the dashboard down. Seed stays visible.
+    } finally {
+      inFlight = null;
+    }
+  })();
+
+  return inFlight;
+}
+
+/** Clients and Requests as the two live screens should see them. */
+export const liveClients = (): Client[] => (crmMeta ? db().clients.filter((c) => !c.demo) : db().clients);
+export const liveRequests = (): ServiceRequest[] => (crmMeta ? db().requests.filter((r) => !r.demo) : db().requests);
 
 // ------------------------------------------------------------------ lookups
 

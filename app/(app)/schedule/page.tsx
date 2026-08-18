@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Icon } from "@/components/Icon";
-import { Avatar, EmptyState, PageHeader, Panel, SectionLabel, StatusPill } from "@/components/ui";
+import { Avatar, DemoNotice, EmptyState, PageHeader, Panel, SectionLabel, StatusPill } from "@/components/ui";
 import { clientName, db, getStaff, propertyFor, visitsBetween } from "@/lib/db";
 import { timeOfDay, timeRange } from "@/lib/format";
 
@@ -38,6 +38,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
 
   return (
     <>
+      <DemoNotice what="The dispatch board and every visit on it." />
       <PageHeader
         title="Schedule"
         subtitle="Dispatch board — every visit, every crew, one week at a time."

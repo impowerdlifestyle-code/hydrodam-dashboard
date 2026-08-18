@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Bar, EmptyState, PageHeader, Panel, RowLink, SectionLabel, StatCard, StatusPill, Table, Td, Th } from "@/components/ui";
+import { Bar, DemoNotice, EmptyState, PageHeader, Panel, RowLink, SectionLabel, StatCard, StatusPill, Table, Td, Th } from "@/components/ui";
 import { arAging, clientName, collectedSince, db } from "@/lib/db";
 import { compactMoney, money, shortDate } from "@/lib/format";
 
@@ -35,6 +35,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
+      <DemoNotice what="Invoices, payments and AR aging." />
       <PageHeader title="Invoices" subtitle="Deposits, progress payments and balances — card and ACH." />
 
       <div className="grid gap-4 sm:grid-cols-3">
