@@ -123,7 +123,7 @@ create table clients (
   first_name   text, last_name text, company_name text,
   display_name text generated always as (
                  coalesce(nullif(trim(company_name),''),
-                          nullif(trim(concat_ws(' ', first_name, last_name)),''),
+                          nullif(trim(coalesce(first_name,'') || ' ' || coalesce(last_name,'')),''),
                           'Unnamed client')) stored,
   email        citext,
   phone        text,                              -- E.164
@@ -1178,9 +1178,11 @@ create table hubspot_sync_state (
   last_pushed_at timestamptz,
   last_error  text,
   created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now(),
-  unique (company_id, entity_type, entity_id, hubspot_object_type, coalesce(note_kind,''))
+  updated_at  timestamptz not null default now()
 );
+-- A UNIQUE table constraint cannot contain an expression; this needs an index.
+create unique index hubspot_sync_state_uk on hubspot_sync_state
+  (company_id, entity_type, entity_id, hubspot_object_type, coalesce(note_kind,''));
 create trigger t_hubspot_upd before update on hubspot_sync_state for each row execute function app.set_updated_at();
 
 create table hubspot_import_map (
@@ -1192,9 +1194,11 @@ create table hubspot_import_map (
   entity_type text not null,
   entity_id   uuid not null,
   imported_at timestamptz not null default now(),
-  raw        jsonb,
-  unique (company_id, hubspot_object_type, hubspot_object_id, coalesce(hubspot_note_id,''), entity_type)
+  raw        jsonb
 );
+-- Expression in the key, so a unique index rather than a table constraint.
+create unique index hubspot_import_map_uk on hubspot_import_map
+  (company_id, hubspot_object_type, hubspot_object_id, coalesce(hubspot_note_id,''), entity_type);
 
 -- Client portal links. The old scheme derived the token from a record id and
 -- had no expiry and no per-link revocation — rotating the secret killed every
