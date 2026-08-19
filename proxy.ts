@@ -33,8 +33,12 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // everything except the portal, auth routes, the signed Telnyx webhook,
-    // static assets and files
-    "/((?!p/|login|api/auth|api/telnyx|_next/static|_next/image|favicon.ico|.*\\..*).*)",
+    // Everything except the routes that carry their own credential:
+    //   p/          the portal token IS the credential, verified in the route
+    //   api/telnyx  an Ed25519 signature, checked before a field is read
+    //   api/intake  a shared secret header, server-to-server
+    //   api/cron    CRON_SECRET as a bearer token
+    // plus the login flow, static assets and files.
+    "/((?!p/|login|api/auth|api/telnyx|api/intake|api/cron|_next/static|_next/image|favicon.ico|.*\\..*).*)",
   ],
 };
