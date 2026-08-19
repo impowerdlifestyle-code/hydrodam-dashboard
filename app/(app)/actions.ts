@@ -1,15 +1,18 @@
 "use server";
 
+import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { AGREEMENT_VERSION, ESIGN_CONSENT } from "@/lib/agreement";
 import {
   DB_LIVE, addTeammate, approveQuote, clockIn, clockOut, convertQuoteToJob, createInvoice,
   addOpening, createQuote, createVisit, ensureData, getJob, getQuote, getRequest, getVisit,
-  moveVisit, openingsFor, realRequestId, recordPayment, removeOpening, saveChecklist, saveProperty,
+  moveVisit, openingsFor, realClientId, realRequestId, recordPayment, removeOpening, saveChecklist,
+  saveProperty,
   setTeammateActive, toggleAutomation, updateInvoice, updateJob, updateQuote, updateRequest,
   updateVisit,
 } from "@/lib/db";
 import { specFor } from "@/lib/pricing";
+import { mintPortalLink, revokePortalLinks } from "@/lib/portal";
 import { requireSession } from "@/lib/session";
 import type {
   InvoiceKind, JobStatus, OpeningType, PaymentMethod, RequestStatus, Role, Series, VisitKind,
@@ -58,9 +61,17 @@ export type OpsInput =
       kind: "opening.add"; propertyId: string; label: string; type: OpeningType;
       widthIn: number; protectionHeightIn: number; surface?: string;
     }
-  | { kind: "opening.remove"; id: string };
+  | { kind: "opening.remove"; id: string }
+  | { kind: "portal.link"; clientId: string; quoteId?: string; jobId?: string }
+  | { kind: "portal.revoke"; clientId: string };
 
-export type OpsResult = { ok: boolean; message: string; href?: string };
+export type OpsResult = {
+  ok: boolean;
+  message: string;
+  href?: string;
+  /** Shown once, for copying. A portal token is never recoverable afterwards. */
+  reveal?: string;
+};
 
 const NEEDS_DB = "Connect Supabase first — this writes to the database.";
 
@@ -353,6 +364,31 @@ async function dispatch(input: OpsInput): Promise<OpsResult> {
     case "opening.remove":
       await removeOpening(input.id);
       return { ok: true, message: "Opening removed." };
+
+    // -------------------------------------------------------------- portal
+
+    case "portal.link": {
+      if (!DB_LIVE) return { ok: false, message: NEEDS_DB };
+      const { clientId } = await realClientId(input.clientId);
+      const token = await mintPortalLink({ clientId, quoteId: input.quoteId, jobId: input.jobId });
+      if (!token) return { ok: false, message: "Could not mint a link." };
+
+      const head = await headers();
+      const host = head.get("host") ?? "hydrodam-dashboard.vercel.app";
+      const scheme = host.startsWith("localhost") ? "http" : "https";
+      return {
+        ok: true,
+        message: "Link created. It is shown once — copy it now.",
+        reveal: `${scheme}://${host}/p/${token}`,
+      };
+    }
+
+    case "portal.revoke": {
+      if (!DB_LIVE) return { ok: false, message: NEEDS_DB };
+      const { clientId } = await realClientId(input.clientId);
+      await revokePortalLinks(clientId);
+      return { ok: true, message: "Every outstanding link for this client is dead." };
+    }
 
     // ----------------------------------------------------------- checklist
 

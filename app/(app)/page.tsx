@@ -87,7 +87,7 @@ export default async function OverviewPage() {
             Today on the board
           </SectionLabel>
           {today.length === 0 ? (
-            <EmptyState icon="calendar" title="Nothing scheduled today" body="Drag a job onto the dispatch board to fill the day." action={<LinkButton href="/schedule" size="sm" variant="secondary">Open schedule</LinkButton>} />
+            <EmptyState icon="calendar" title="Nothing scheduled today" body="Book a visit from a job or a request and it lands here." action={<LinkButton href="/schedule" size="sm" variant="secondary">Open schedule</LinkButton>} />
           ) : (
             <ul className="flex flex-col gap-2">
               {today.map((v) => {

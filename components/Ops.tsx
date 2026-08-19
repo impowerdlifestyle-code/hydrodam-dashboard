@@ -47,12 +47,39 @@ export function OpsToast({ feedback }: { feedback: Feedback }) {
   if (!feedback) return null;
   const tone = feedback.ok ? "text-good border-good/30 bg-good/[0.06]" : "text-bad border-bad/30 bg-bad/[0.06]";
   return (
-    <p className={`mt-3 flex items-start gap-2 rounded-xl border px-3 py-2 text-xs leading-relaxed ${tone}`}>
-      <span className="mt-px shrink-0">
-        <Icon name={feedback.ok ? "check" : "alert"} size={13} />
-      </span>
-      {feedback.message}
-    </p>
+    <div className="mt-3">
+      <p className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-xs leading-relaxed ${tone}`}>
+        <span className="mt-px shrink-0">
+          <Icon name={feedback.ok ? "check" : "alert"} size={13} />
+        </span>
+        {feedback.message}
+      </p>
+      {feedback.reveal && <RevealOnce value={feedback.reveal} />}
+    </div>
+  );
+}
+
+/** A secret the server will not hand over twice. Select-all on click. */
+function RevealOnce({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <input
+        readOnly
+        value={value}
+        onFocus={(e) => e.currentTarget.select()}
+        className="min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 py-2 font-mono text-[11px] text-ink"
+      />
+      <button
+        type="button"
+        className={buttonClass("outline", "sm")}
+        onClick={() => {
+          navigator.clipboard?.writeText(value).then(() => setCopied(true), () => setCopied(false));
+        }}
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </div>
   );
 }
 

@@ -5,7 +5,7 @@ import {
 } from "@/components/ui";
 import { JOURNEY } from "@/lib/data";
 import { Stepper } from "@/components/ui";
-import { OpsButton } from "@/components/Ops";
+import { OpsButton, OpsGroup } from "@/components/Ops";
 import { OpeningForm, PropertyForm } from "@/components/OpsForms";
 import { db, ensureData, getClient, invoicesFor, jobsFor, openingsFor, propertyFor, quotesFor } from "@/lib/db";
 import { money, phoneDisplay, shortDate } from "@/lib/format";
@@ -63,6 +63,22 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="flex flex-col gap-6 lg:col-span-2">
+          <Panel>
+            <SectionLabel>Client portal</SectionLabel>
+            <p className="mb-3 text-xs leading-relaxed text-ink-dim">
+              An account-free link to their own project. The link is the credential, so it is shown
+              once and stored only as a hash — mint a new one rather than hunting for the old.
+            </p>
+            <OpsGroup>
+              <OpsButton input={{ kind: "portal.link", clientId: client.id }} variant="primary" icon="link">
+                Create a link
+              </OpsButton>
+              <OpsButton input={{ kind: "portal.revoke", clientId: client.id }} variant="outline" confirm="Revoke all">
+                Revoke existing
+              </OpsButton>
+            </OpsGroup>
+          </Panel>
+
           <Panel>
             <SectionLabel>Service address</SectionLabel>
             {!prop && (

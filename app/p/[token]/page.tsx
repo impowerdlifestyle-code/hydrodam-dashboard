@@ -1,34 +1,48 @@
+import { headers } from "next/headers";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Icon } from "@/components/Icon";
 import { Badge, Stepper } from "@/components/ui";
 import { JOURNEY } from "@/lib/data";
 import {
-  db, getClient, getQuote, invoicesFor, jobsFor, nextVisitFor, propertyFor, quotesFor,
+  DB_LIVE, db, getClient, getQuote, invoicesFor, jobsFor, nextVisitFor, propertyFor, quotesFor,
   ensureData,
 } from "@/lib/db";
+import { resolvePortalToken } from "@/lib/portal";
 import { longDate, money, shortDate, timeRange } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Your HydroDam project", robots: { index: false, follow: false } };
 
 /**
- * Client portal. In production the token is an opaque random string whose
- * sha256 is stored server-side with an expiry and a revocation flag — never
- * derived from a record id, so a link leaks nothing and cannot be forged.
- * Here it resolves against the seeded data so the surface is walkable.
+ * The token is the credential: an opaque random string whose sha256 is stored
+ * with an expiry and a revocation flag, resolved in lib/portal.ts and logged
+ * either way. It is never derived from a record id, so possessing a quote id
+ * grants nothing.
+ *
+ * With no database configured there is nowhere to store a hash, so the seed
+ * path falls back to resolving a seeded id — walkable locally, and unreachable
+ * in production because DB_LIVE is true there.
  */
-function resolveToken(token: string): string | null {
-  const quoteId = token.replace(/^demo-/, "");
-  const quote = getQuote(quoteId);
-  if (quote) return quote.clientId;
-  const client = db().clients.find((c) => c.id === quoteId);
-  return client?.id ?? null;
+async function resolveToken(token: string): Promise<string | null> {
+  if (DB_LIVE) {
+    const head = await headers();
+    const link = await resolvePortalToken(token, {
+      ip: head.get("x-forwarded-for")?.split(",")[0]?.trim(),
+      userAgent: head.get("user-agent") ?? undefined,
+      path: "/p",
+    });
+    return link?.clientId ?? null;
+  }
+
+  const seededId = token.replace(/^demo-/, "");
+  return getQuote(seededId)?.clientId ?? db().clients.find((c) => c.id === seededId)?.id ?? null;
 }
 
 export default async function PortalPage({ params }: { params: Promise<{ token: string }> }) {
   await ensureData();
   const { token } = await params;
-  const clientId = resolveToken(token);
+  const clientId = await resolveToken(token);
   if (!clientId) notFound();
 
   const client = getClient(clientId)!;
@@ -36,8 +50,8 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const quotes = quotesFor(clientId);
   const jobs = jobsFor(clientId);
   const invoices = invoicesFor(clientId);
-  const quote = quotes[quotes.length - 1];
-  const job = jobs[jobs.length - 1];
+  const quote = [...quotes].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const job = [...jobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
   const nextVisit = job ? nextVisitFor(job.id) : undefined;
   const balance = invoices.reduce((s, i) => s + (i.totalCents - i.amountPaidCents), 0);
 
@@ -120,9 +134,12 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
           </dl>
 
           {!["approved", "converted"].includes(quote.status) ? (
-            <button className="mt-4 w-full rounded-xl bg-teal py-3.5 text-sm font-semibold text-white transition-opacity hover:opacity-90">
+            <Link
+              href={`/p/${token}/approve`}
+              className="mt-4 block w-full rounded-xl bg-teal py-3.5 text-center text-sm font-semibold text-white transition-opacity hover:opacity-90"
+            >
               Review and approve
-            </button>
+            </Link>
           ) : (
             <p className="mt-4 flex items-center gap-2 rounded-xl border border-good/30 bg-good/10 px-3 py-2.5 text-xs text-good">
               <Icon name="check" size={14} />
@@ -136,16 +153,9 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
         <section className="panel mt-4 rounded-2xl p-5">
           <p className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">Balance due</p>
           <p className="mt-1.5 font-display text-2xl font-bold text-ink">{money(balance, true)}</p>
-          <div className="mt-4 flex flex-col gap-2">
-            <button className="w-full rounded-xl bg-good py-3.5 text-sm font-semibold text-white transition-opacity hover:opacity-90">
-              Pay by bank transfer — no fee
-            </button>
-            <button className="w-full rounded-xl border border-line py-3 text-sm text-ink-dim transition-colors hover:border-line-bright hover:text-ink">
-              Pay by card
-            </button>
-          </div>
-          <p className="mt-2.5 text-xs text-ink-faint">
-            Bank transfer clears in 3–5 business days. Card is instant but carries a processing fee.
+          <p className="mt-3 text-sm leading-relaxed text-ink-dim">
+            HydroDam will send payment details with your invoice. Bank transfer is preferred and
+            carries no fee; a card payment carries a processing fee on an amount this size.
           </p>
         </section>
       )}
