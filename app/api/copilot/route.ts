@@ -1,7 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import {
-  arAging, clientName, db, jobCosting, metrics, sourcePerformance, todaysVisits,
+  arAging, clientName, db, ensureData, jobCosting, liveRequests, metrics, sourcePerformance,
+  todaysVisits,
 } from "@/lib/db";
+import { requireSession } from "@/lib/session";
 import { money, shortDate, timeRange } from "@/lib/format";
 
 export const runtime = "nodejs";
@@ -31,27 +33,32 @@ function context(): string {
     ).join("; ") || "nothing scheduled")
   );
 
+  // The lead list is ~3,000 rows. Pasting all of them would blow the context
+  // window, cost real money per question and bury the handful of records that
+  // actually need a decision. Open work goes in full; the rest is a count.
+  const requests = liveRequests().filter((r) => !["converted", "unqualified"].includes(r.status));
   lines.push(
-    "REQUESTS: " + d.requests.map((r) =>
+    `REQUESTS (${requests.length} open of ${liveRequests().length}): ` +
+    requests.slice(0, 40).map((r) =>
       `#${r.number} ${clientName(r.clientId)} — ${r.status}, ${r.source}${r.firstResponseAt ? "" : ", NO REPLY YET"}`
     ).join("; ")
   );
 
   lines.push(
-    "QUOTES: " + d.quotes.map((q) =>
+    "QUOTES: " + d.quotes.slice(0, 60).map((q) =>
       `#${q.number} ${clientName(q.clientId)} ${money(q.totalCents)} ${q.primarySeries} — ${q.status}, valid to ${q.validUntil}`
     ).join("; ")
   );
 
   lines.push(
-    "JOBS: " + d.jobs.map((j) => {
+    "JOBS: " + d.jobs.slice(0, 60).map((j) => {
       const c = jobCosting(j.id);
       return `#${j.number} ${clientName(j.clientId)} ${money(j.contractCents)} — ${j.status}, fabrication ${j.fabricationStatus}, margin ${(c.marginBps / 100).toFixed(0)}%`;
     }).join("; ")
   );
 
   lines.push(
-    "INVOICES: " + d.invoices.map((i) =>
+    "INVOICES: " + d.invoices.filter((i) => i.status !== "void").slice(0, 60).map((i) =>
       `#${i.number} ${clientName(i.clientId)} ${money(i.totalCents)} ${i.status}, balance ${money(i.totalCents - i.amountPaidCents)}, due ${shortDate(i.dueDate)}`
     ).join("; ")
   );
@@ -65,8 +72,10 @@ function context(): string {
     ).join("; ")
   );
 
+  const consented = d.clients.filter((c) => c.smsConsent);
   lines.push(
-    "CONSENT: " + d.clients.filter((c) => !c.smsConsent).map((c) => c.name).join(", ") + " have NOT consented to marketing SMS."
+    `CONSENT: ${consented.length} of ${d.clients.length} clients have consented to marketing SMS` +
+    (consented.length ? `: ${consented.slice(0, 30).map((c) => c.name).join(", ")}.` : ". Nobody else may be texted marketing.")
   );
 
   return lines.join("\n");
@@ -93,6 +102,12 @@ function fallback(): string {
 
 export async function POST(req: Request) {
   try {
+    // The copilot reads the whole operating picture, so it is as sensitive as
+    // any screen. The proxy matcher covers /api/copilot today; this does not
+    // depend on that staying true.
+    await requireSession();
+    await ensureData();
+
     const { messages } = (await req.json()) as { messages: Msg[] };
     const key = process.env.ANTHROPIC_API_KEY;
     if (!key) return Response.json({ reply: fallback() });
