@@ -3,7 +3,8 @@ import { Badge, EmptyState, PageHeader, Panel, SectionLabel, StatCard } from "@/
 import { Icon } from "@/components/Icon";
 import { MESSAGE_TEMPLATES } from "@/lib/data";
 import { clientName, db, messagesFor } from "@/lib/db";
-import { relative } from "@/lib/format";
+import { phoneDisplay, relative } from "@/lib/format";
+import { telnyxStatus } from "@/lib/telnyx";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Inbox · HydroDam Ops" };
@@ -14,9 +15,27 @@ export default function InboxPage() {
   const unread = convs.reduce((s, c) => s + c.unreadCount, 0);
   const outbound30 = d.messages.filter((m) => m.direction === "outbound").length;
 
+  const telnyx = telnyxStatus();
+
   return (
     <>
-      <PageHeader title="Inbox" subtitle="Two-way SMS and email, threaded per client." />
+      <PageHeader
+        title="Inbox"
+        subtitle="Two-way SMS and email, threaded per client."
+        action={
+          <Badge tone={telnyx.live ? "good" : "warn"}>
+            <span className="h-1.5 w-1.5 rounded-full bg-current" />
+            {telnyx.live ? `Telnyx ${phoneDisplay(telnyx.from)}` : "Telnyx not connected"}
+          </Badge>
+        }
+      />
+
+      {telnyx.live && !telnyx.signed && (
+        <p className="mb-4 rounded-xl border border-warn/30 bg-warn/[0.06] px-4 py-3 text-xs leading-relaxed text-ink-dim">
+          <span className="font-semibold text-warn">Inbound is off.</span> TELNYX_PUBLIC_KEY is not set, so
+          the webhook refuses every delivery — replies from customers will not appear here until it is.
+        </p>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Unread" value={unread} accent={unread ? "ember" : "good"} />

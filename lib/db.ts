@@ -1,6 +1,8 @@
 import "server-only";
 import { buildSeed } from "@/lib/seed";
 import { CRM_LIVE, fetchCrm } from "@/lib/hubspot";
+import { phoneDisplay } from "@/lib/format";
+import { phoneKey, toE164 } from "@/lib/telnyx";
 import type {
   Client, Conversation, Invoice, Job, Message, Opening, Payment, Property, Quote,
   ServiceRequest, Snapshot, Staff, Visit,
@@ -20,15 +22,22 @@ import type {
 
 export const DB_LIVE = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-let snapshot: Snapshot | null = null;
+// The snapshot hangs off globalThis rather than a module binding because Next
+// bundles route handlers and page renders separately — two module instances,
+// two snapshots. Without this, an SMS written by the Telnyx webhook would be
+// invisible to the Inbox that renders it.
+const SNAPSHOT = Symbol.for("hydrodam.snapshot");
+type SnapshotHost = typeof globalThis & { [SNAPSHOT]?: Snapshot };
 
 export function db(): Snapshot {
-  if (!snapshot) {
-    snapshot = buildSeed();
-    for (const c of snapshot.clients) c.demo = true;
-    for (const r of snapshot.requests) r.demo = true;
+  const host = globalThis as SnapshotHost;
+  if (!host[SNAPSHOT]) {
+    const seeded = buildSeed();
+    for (const c of seeded.clients) c.demo = true;
+    for (const r of seeded.requests) r.demo = true;
+    host[SNAPSHOT] = seeded;
   }
-  return snapshot;
+  return host[SNAPSHOT];
 }
 
 // ---------------------------------------------------------------------- CRM
@@ -65,7 +74,9 @@ export async function ensureCrm(): Promise<void> {
       const crm = await fetchCrm();
       if (!crm) return;
       const d = db();
-      d.clients = [...d.clients.filter((c) => c.demo), ...crm.clients];
+      // SMS_LEAD_SOURCE rows were created by someone texting the Telnyx number.
+      // They have no HubSpot record yet, so a refresh must not wipe them.
+      d.clients = [...d.clients.filter((c) => c.demo || c.leadSource === SMS_LEAD_SOURCE), ...crm.clients];
       d.properties = [...d.properties.filter((p) => !p.id.startsWith("hsp_")), ...crm.properties];
       d.requests = [...d.requests.filter((r) => r.demo), ...crm.requests];
       crmMeta = {
@@ -419,7 +430,11 @@ export function recordPayment(invoiceId: string, amountCents: number, method: Pa
   return payment;
 }
 
-export function sendMessage(conversationId: string, body: string): Message | undefined {
+export function sendMessage(
+  conversationId: string,
+  body: string,
+  meta?: { providerId?: string; deliveryStatus?: Message["deliveryStatus"]; templateKey?: string }
+): Message | undefined {
   const d = db();
   const conv = d.conversations.find((c) => c.id === conversationId);
   if (!conv) return undefined;
@@ -432,9 +447,11 @@ export function sendMessage(conversationId: string, body: string): Message | und
     body,
     createdAt: new Date().toISOString(),
     read: true,
+    ...meta,
   };
   d.messages.push(msg);
   conv.lastMessageAt = msg.createdAt;
+  conv.status = "open";
   return msg;
 }
 
@@ -529,4 +546,124 @@ export function nextVisitFor(jobId: string): Visit | undefined {
 export function daysOverdue(dueDate?: string): number {
   if (!dueDate) return 0;
   return Math.round((Date.now() - Date.parse(dueDate)) / 86_400_000);
+}
+
+// ----------------------------------------------------------------- inbound SMS
+//
+// Telnyx is the system of record for the message itself; this snapshot is the
+// working copy the Inbox renders. Everything here is keyed off the last ten
+// digits of a phone number, because HubSpot stores them however they were typed.
+
+/** Lead source stamped on clients we first met over SMS. */
+export const SMS_LEAD_SOURCE = "Inbound SMS";
+
+export function findClientByPhone(phone: string): Client | undefined {
+  const key = phoneKey(phone);
+  if (key.length !== 10) return undefined;
+  return db().clients.find((c) => phoneKey(c.phone) === key);
+}
+
+/** Whoever texted us, as a client row — creating a lead if we've never met them. */
+function clientForInbound(from: string): Client {
+  const existing = findClientByPhone(from);
+  if (existing) return existing;
+
+  const d = db();
+  const client: Client = {
+    id: `cl_sms_${phoneKey(from)}`,
+    name: phoneDisplay(toE164(from)),
+    phone: toE164(from),
+    type: "residential",
+    leadSource: SMS_LEAD_SOURCE,
+    // They opened the thread. That is consent to reply, not consent to market.
+    smsConsent: false,
+    tags: ["sms"],
+    createdAt: new Date().toISOString(),
+  };
+  d.clients.push(client);
+  return client;
+}
+
+export function conversationForPhone(phone: string): Conversation {
+  const d = db();
+  const key = phoneKey(phone);
+  const existing = d.conversations.find(
+    (c) => c.channel === "sms" && phoneKey(c.externalAddress) === key
+  );
+  if (existing) return existing;
+
+  const client = clientForInbound(phone);
+  const conv: Conversation = {
+    id: `cv_sms_${key}`,
+    clientId: client.id,
+    channel: "sms",
+    externalAddress: toE164(phone),
+    lastMessageAt: new Date().toISOString(),
+    unreadCount: 0,
+    status: "open",
+  };
+  d.conversations.push(conv);
+  return conv;
+}
+
+export function recordInboundSms(opts: {
+  from: string;
+  body: string;
+  receivedAt?: string;
+  providerId?: string;
+}): { conversation: Conversation; message: Message } {
+  const d = db();
+  const conv = conversationForPhone(opts.from);
+  const createdAt = opts.receivedAt ?? new Date().toISOString();
+  const msg: Message = {
+    id: `ms_${d.messages.length + 1}`,
+    conversationId: conv.id,
+    clientId: conv.clientId,
+    channel: "sms",
+    direction: "inbound",
+    body: opts.body,
+    createdAt,
+    read: false,
+    providerId: opts.providerId,
+  };
+  d.messages.push(msg);
+  conv.lastMessageAt = createdAt;
+  conv.unreadCount += 1;
+  conv.status = "open";
+  return { conversation: conv, message: msg };
+}
+
+/** A delivery receipt from Telnyx, matched back to the message we sent. */
+export function applyDeliveryReceipt(providerId: string, status: Message["deliveryStatus"], error?: string): Message | undefined {
+  const msg = db().messages.find((m) => m.providerId === providerId);
+  if (!msg) return undefined;
+  msg.deliveryStatus = status;
+  msg.deliveryError = error;
+  return msg;
+}
+
+export function setSmsConsent(clientId: string, consented: boolean): Client | undefined {
+  const client = getClient(clientId);
+  if (!client) return undefined;
+  client.smsConsent = consented;
+  client.smsOptOutAt = consented ? undefined : new Date().toISOString();
+  return client;
+}
+
+/**
+ * The one place that decides whether a text may leave the building.
+ *
+ * `reply` is a human answering a thread the customer opened — allowed unless
+ * they have opted out. `marketing` needs recorded consent, which no HubSpot
+ * contact currently has, so the composer stays honest about it.
+ */
+export function smsGate(client: Client | undefined, kind: "reply" | "marketing"): { ok: boolean; reason?: string } {
+  if (!client) return { ok: false, reason: "No client on this thread." };
+  if (client.demo) return { ok: false, reason: "This is a seeded demo client. Sending would text a made-up number." };
+  if (!client.phone) return { ok: false, reason: "No mobile number on this client." };
+  if (client.smsOptOutAt) return { ok: false, reason: "This client texted STOP. Only they can restart the thread." };
+  if (kind === "marketing" && !client.smsConsent) {
+    return { ok: false, reason: "No marketing consent on file. Transactional replies still send." };
+  }
+  return { ok: true };
 }

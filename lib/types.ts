@@ -35,6 +35,8 @@ export type Client = {
   leadSource: string;
   smsConsent: boolean;
   smsConsentWording?: string;
+  /** Set when they text STOP. A hard block on every send, transactional included. */
+  smsOptOutAt?: string;
   tags: string[];
   createdAt: string;
   hubspotContactId?: string;
@@ -239,6 +241,11 @@ export type Message = {
   createdAt: string;
   read: boolean;
   templateKey?: string;
+  /** Telnyx message id, once the send is accepted. */
+  providerId?: string;
+  /** Last delivery receipt Telnyx sent for this message. */
+  deliveryStatus?: "queued" | "sent" | "delivered" | "failed";
+  deliveryError?: string;
 };
 
 export type Conversation = {

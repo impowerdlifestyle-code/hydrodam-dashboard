@@ -10,7 +10,9 @@ import { NextResponse, type NextRequest } from "next/server";
  * silently drop coverage. Anything that reads or writes real data re-checks.
  *
  * The client portal (/p/:token) is deliberately public — the token in the URL
- * is the credential, verified in the route itself.
+ * is the credential, verified in the route itself. The Telnyx webhook is public
+ * for the same reason: its credential is the Ed25519 signature, which the route
+ * checks before it reads a single field.
  */
 
 const SESSION_COOKIE = "hd_session";
@@ -31,7 +33,8 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // everything except the portal, auth routes, static assets and files
-    "/((?!p/|login|api/auth|_next/static|_next/image|favicon.ico|.*\\..*).*)",
+    // everything except the portal, auth routes, the signed Telnyx webhook,
+    // static assets and files
+    "/((?!p/|login|api/auth|api/telnyx|_next/static|_next/image|favicon.ico|.*\\..*).*)",
   ],
 };
