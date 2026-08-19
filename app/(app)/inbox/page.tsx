@@ -2,18 +2,17 @@ import Link from "next/link";
 import { Badge, EmptyState, PageHeader, Panel, SectionLabel, StatCard } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import { MESSAGE_TEMPLATES } from "@/lib/data";
-import { clientName, db, messagesFor } from "@/lib/db";
+import { inboxThreads } from "@/lib/comms";
 import { phoneDisplay, relative } from "@/lib/format";
 import { telnyxStatus } from "@/lib/telnyx";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Inbox · HydroDam Ops" };
 
-export default function InboxPage() {
-  const d = db();
-  const convs = [...d.conversations].sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
-  const unread = convs.reduce((s, c) => s + c.unreadCount, 0);
-  const outbound30 = d.messages.filter((m) => m.direction === "outbound").length;
+export default async function InboxPage() {
+  const threads = await inboxThreads();
+  const unread = threads.reduce((s, t) => s + t.conversation.unreadCount, 0);
+  const outbound30 = threads.filter((t) => t.last?.direction === "outbound").length;
 
   const telnyx = telnyxStatus();
 
@@ -39,20 +38,18 @@ export default function InboxPage() {
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Unread" value={unread} accent={unread ? "ember" : "good"} />
-        <StatCard label="Open threads" value={convs.filter((c) => c.status === "open").length} />
+        <StatCard label="Open threads" value={threads.filter((t) => t.conversation.status === "open").length} />
         <StatCard label="Messages sent" value={outbound30} sub="templates and automations" accent="teal" />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         <Panel className="lg:col-span-2">
           <SectionLabel>Conversations</SectionLabel>
-          {convs.length === 0 ? (
+          {threads.length === 0 ? (
             <EmptyState icon="mail" title="No conversations" />
           ) : (
             <ul className="flex flex-col gap-1.5">
-              {convs.map((c) => {
-                const last = messagesFor(c.id).at(-1);
-                return (
+              {threads.map(({ conversation: c, name, last }) => (
                   <li key={c.id}>
                     <Link href={`/inbox/${c.id}`} className="flex items-start gap-3 rounded-xl border border-line/60 p-3 transition-colors hover:border-line-bright">
                       <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${c.unreadCount ? "bg-ember/15 text-ember" : "bg-teal/10 text-teal"}`}>
@@ -61,7 +58,7 @@ export default function InboxPage() {
                       <span className="min-w-0 flex-1">
                         <span className="flex items-baseline justify-between gap-2">
                           <span className={`truncate text-sm ${c.unreadCount ? "font-bold text-ink" : "font-semibold text-ink-dim"}`}>
-                            {clientName(c.clientId)}
+                            {name}
                           </span>
                           <span className="shrink-0 font-mono text-[10px] text-ink-faint">{relative(c.lastMessageAt)}</span>
                         </span>
@@ -75,8 +72,7 @@ export default function InboxPage() {
                       )}
                     </Link>
                   </li>
-                );
-              })}
+              ))}
             </ul>
           )}
         </Panel>

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge, PageHeader, Panel, SectionLabel } from "@/components/ui";
 import { ReplyComposer } from "@/components/ReplyComposer";
-import { clientName, getClient, getConversation, markConversationRead, messagesFor, propertyFor, smsGate } from "@/lib/db";
+import { clientOn, getConversation, markRead, messagesIn } from "@/lib/comms";
+import { propertyFor, smsGate } from "@/lib/db";
 import { dateTime, phoneDisplay, relative } from "@/lib/format";
 import { TELNYX_LIVE } from "@/lib/telnyx";
 
@@ -10,11 +11,11 @@ export const dynamic = "force-dynamic";
 
 export default async function ThreadPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const conv = getConversation(id);
+  const conv = await getConversation(id);
   if (!conv) notFound();
 
-  const client = getClient(conv.clientId);
-  const msgs = messagesFor(conv.id);
+  const client = await clientOn(conv);
+  const msgs = await messagesIn(conv.id);
   const prop = propertyFor(conv.clientId);
 
   const gate = smsGate(client, "reply");
@@ -26,7 +27,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ id: str
         ? undefined
         : gate.reason;
 
-  markConversationRead(conv.id);
+  await markRead(conv.id);
 
   return (
     <>
@@ -35,7 +36,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ id: str
       </Link>
 
       <PageHeader
-        title={clientName(conv.clientId)}
+        title={client?.name ?? conv.externalAddress}
         subtitle={`${conv.channel.toUpperCase()} · ${conv.channel === "sms" ? phoneDisplay(conv.externalAddress) : conv.externalAddress}`}
       />
 

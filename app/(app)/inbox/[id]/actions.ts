@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getClient, getConversation, markConversationRead, sendMessage, smsGate } from "@/lib/db";
+import { clientOn, getConversation, markRead, recordOutbound } from "@/lib/comms";
+import { smsGate } from "@/lib/db";
 import { TELNYX_LIVE, sendSms } from "@/lib/telnyx";
 
 export async function sendReplyAction(
@@ -11,11 +12,12 @@ export async function sendReplyAction(
   const text = body.trim();
   if (!text) return { ok: false, message: "Nothing to send." };
 
-  const conv = getConversation(conversationId);
+  const conv = await getConversation(conversationId);
   if (!conv) return { ok: false, message: "That thread no longer exists." };
   if (conv.channel !== "sms") return { ok: false, message: "Email replies aren't wired up yet." };
 
-  const gate = smsGate(getClient(conv.clientId), "reply");
+  const client = await clientOn(conv);
+  const gate = smsGate(client, "reply");
   if (!gate.ok) return { ok: false, message: gate.reason! };
 
   if (!TELNYX_LIVE) {
@@ -25,16 +27,16 @@ export async function sendReplyAction(
   const res = await sendSms(conv.externalAddress, text);
   if (!res.ok) return { ok: false, message: res.error };
 
-  sendMessage(conversationId, text, { providerId: res.id, deliveryStatus: "queued" });
-  markConversationRead(conversationId);
+  await recordOutbound({
+    conversationId,
+    clientId: conv.clientId,
+    to: conv.externalAddress,
+    body: text,
+    providerId: res.id,
+  });
+  await markRead(conversationId);
 
   revalidatePath("/inbox");
   revalidatePath(`/inbox/${conversationId}`);
   return { ok: true, message: "Sent." };
-}
-
-export async function markReadAction(conversationId: string): Promise<void> {
-  markConversationRead(conversationId);
-  revalidatePath("/inbox");
-  revalidatePath(`/inbox/${conversationId}`);
 }

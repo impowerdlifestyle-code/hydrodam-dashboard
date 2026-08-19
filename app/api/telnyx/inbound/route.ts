@@ -1,11 +1,6 @@
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
-import {
-  applyDeliveryReceipt,
-  findClientByPhone,
-  recordInboundSms,
-  setSmsConsent,
-} from "@/lib/db";
+import { applyReceipt, recordInbound, recordKeywordConsent } from "@/lib/comms";
 import { keywordIn, sendSms, verifyWebhook } from "@/lib/telnyx";
 
 /**
@@ -69,31 +64,38 @@ export async function POST(req: Request) {
     const body = p.text ?? "";
     if (!from) return NextResponse.json({ ok: true });
 
-    const { conversation } = recordInboundSms({
+    const { conversationId, clientId } = await recordInbound({
       from,
+      to: p.to?.[0]?.phone_number ?? process.env.TELNYX_FROM ?? "",
       body,
       receivedAt: p.received_at,
       providerId: p.id,
     });
 
     // Telnyx blocks further sends after STOP on its side. Mirroring it here is
-    // what stops the Inbox from offering a reply box that would silently fail.
+    // what stops the Inbox from offering a reply box that would silently fail,
+    // and the ledger is the evidence if the opt-out is ever disputed.
     const keyword = keywordIn(body);
-    const client = findClientByPhone(from);
-    if (keyword === "stop" && client) setSmsConsent(client.id, false);
-    if (keyword === "start" && client) setSmsConsent(client.id, true);
+    if (keyword === "stop" || keyword === "start") {
+      await recordKeywordConsent({
+        phone: from,
+        clientId,
+        granted: keyword === "start",
+        wording: body.trim(),
+      });
+    }
     if (keyword === "help") await sendSms(from, HELP_REPLY);
 
     revalidatePath("/inbox");
-    revalidatePath(`/inbox/${conversation.id}`);
+    revalidatePath(`/inbox/${conversationId}`);
     return NextResponse.json({ ok: true });
   }
 
   if (type === "message.sent" || type === "message.finalized") {
-    const status = DELIVERY[p.to?.[0]?.status ?? ""] ?? undefined;
+    const status = DELIVERY[p.to?.[0]?.status ?? ""];
     if (p.id && status) {
       const err = p.errors?.[0];
-      applyDeliveryReceipt(p.id, status, err?.detail ?? err?.title);
+      await applyReceipt(p.id, status, err?.detail ?? err?.title);
       revalidatePath("/inbox");
     }
   }
