@@ -9,26 +9,23 @@
 # Everything is idempotent: the schema uses `create ... if not exists` where it
 # can, the API functions are `create or replace`, and the reference seed upserts.
 # Re-running is the normal way to push a change.
+#
+# curl rather than python's urllib throughout: the macOS Python.framework build
+# ships without a CA bundle, so urlopen dies with CERTIFICATE_VERIFY_FAILED
+# against every https host. curl uses the system trust store.
 set -e
 : ${SUPABASE_PAT:?set SUPABASE_PAT}
 here="$(cd "$(dirname "$0")" && pwd)"
 
 api() {
-  python3 - "$@" <<'PY'
-import json, sys, os, urllib.request, urllib.error
-method, path = sys.argv[1], sys.argv[2]
-body = sys.argv[3] if len(sys.argv) > 3 else None
-req = urllib.request.Request(
-    f"https://api.supabase.com/v1{path}",
-    data=body.encode() if body else None,
-    headers={"Authorization": f"Bearer {os.environ['SUPABASE_PAT']}", "Content-Type": "application/json"},
-    method=method)
-try:
-    print(urllib.request.urlopen(req).read().decode())
-except urllib.error.HTTPError as e:
-    print("FAILED", e.code, e.read().decode()[:600], file=sys.stderr)
-    sys.exit(1)
-PY
+  local method="$1" path="$2" body="$3"
+  if [[ -n "$body" ]]; then
+    curl -sS --fail-with-body -X "$method" "https://api.supabase.com/v1$path" \
+      -H "Authorization: Bearer $SUPABASE_PAT" -H "Content-Type: application/json" -d "$body"
+  else
+    curl -sS --fail-with-body -X "$method" "https://api.supabase.com/v1$path" \
+      -H "Authorization: Bearer $SUPABASE_PAT" -H "Content-Type: application/json"
+  fi
 }
 
 if [[ "$1" == "--create" ]]; then
@@ -37,6 +34,7 @@ if [[ "$1" == "--create" ]]; then
   : ${dbpass:?pass a database password}
   echo "→ creating project"
   api POST /projects "{\"name\":\"hydrodam-ops\",\"organization_id\":\"$org\",\"region\":\"us-east-1\",\"db_pass\":\"$dbpass\"}"
+  echo
   echo "Now wait for ACTIVE_HEALTHY (~2.5 min), then re-run with PROJECT_REF set."
   exit 0
 fi
@@ -46,20 +44,20 @@ fi
 run_sql() {
   local label="$1" file="$2"
   echo "→ $label"
-  python3 - "$file" <<'PY'
-import json, os, sys, urllib.request, urllib.error
-sql = open(sys.argv[1]).read()
-req = urllib.request.Request(
-    f"https://api.supabase.com/v1/projects/{os.environ['PROJECT_REF']}/database/query",
-    data=json.dumps({"query": sql}).encode(),
-    headers={"Authorization": f"Bearer {os.environ['SUPABASE_PAT']}", "Content-Type": "application/json"},
-    method="POST")
-try:
-    urllib.request.urlopen(req).read()
-    print("  ok")
-except urllib.error.HTTPError as e:
-    print("  FAILED", e.code, e.read().decode()[:800]); sys.exit(1)
-PY
+  # json.dumps so quotes, dollar-quoting and the em dashes in the migration
+  # comments all survive the round trip. --data-binary @- keeps curl from
+  # mangling newlines.
+  local out
+  if out="$(python3 -c 'import json,sys; sys.stdout.write(json.dumps({"query": open(sys.argv[1]).read()}))' "$file" \
+      | curl -sS --fail-with-body -X POST \
+          "https://api.supabase.com/v1/projects/$PROJECT_REF/database/query" \
+          -H "Authorization: Bearer $SUPABASE_PAT" -H "Content-Type: application/json" \
+          --data-binary @-)"; then
+    echo "  ok"
+  else
+    echo "  FAILED: ${out:0:900}"
+    return 1
+  fi
 }
 
 run_sql "0001_init.sql"  "$here/migrations/0001_init.sql"
@@ -69,14 +67,13 @@ run_sql "bootstrap.sql"  "$here/bootstrap.sql"
 # The forms, the price book and the agreement are generated from the same
 # TypeScript the UI renders, so a reworded question can never drift from the
 # field key the database validates against.
-echo "→ reference seed"
 tmp="$(mktemp -t hydrodam-reference)"
-node "$here/seed-reference.ts" > "$tmp"
-run_sql "reference.sql" "$tmp"
+node "$here/seed-reference.ts" > "$tmp" 2>/dev/null
+run_sql "reference seed" "$tmp"
 rm -f "$tmp"
 
 echo
-echo "service_role key (put on Vercel as SUPABASE_SERVICE_ROLE_KEY):"
+echo "SUPABASE_URL=https://$PROJECT_REF.supabase.co"
+echo -n "SUPABASE_SERVICE_ROLE_KEY="
 api GET "/projects/$PROJECT_REF/api-keys?reveal=true" \
   | python3 -c "import json,sys; print(next(k['api_key'] for k in json.load(sys.stdin) if k['name']=='service_role'))"
-echo "SUPABASE_URL=https://$PROJECT_REF.supabase.co"
