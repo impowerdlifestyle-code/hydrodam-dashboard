@@ -2,11 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Icon } from "@/components/Icon";
 import { ChecklistForm } from "@/components/ChecklistForm";
-import { checklistFor, clientName, getVisit } from "@/lib/db";
+import { checklistFor, clientName, getVisit, ensureData } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 export default async function ChecklistPage({ params }: { params: Promise<{ id: string }> }) {
+  await ensureData();
   const { id } = await params;
   const visit = getVisit(id);
   if (!visit) notFound();

@@ -5,7 +5,9 @@ import {
 } from "@/components/ui";
 import { JOURNEY } from "@/lib/data";
 import { Stepper } from "@/components/ui";
-import { db, ensureCrm, getClient, invoicesFor, jobsFor, openingsFor, propertyFor, quotesFor } from "@/lib/db";
+import { OpsButton } from "@/components/Ops";
+import { OpeningForm, PropertyForm } from "@/components/OpsForms";
+import { db, ensureData, getClient, invoicesFor, jobsFor, openingsFor, propertyFor, quotesFor } from "@/lib/db";
 import { money, phoneDisplay, shortDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +15,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export default async function ClientDetail({ params }: { params: Promise<{ id: string }> }) {
-  await ensureCrm();
+  await ensureData();
   const { id } = await params;
   const client = getClient(id);
   if (!client) notFound();
@@ -61,26 +63,60 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="flex flex-col gap-6 lg:col-span-2">
-          {openings.length > 0 && (
+          <Panel>
+            <SectionLabel>Service address</SectionLabel>
+            {!prop && (
+              <p className="mb-4 text-xs leading-relaxed text-warn">
+                HubSpot has no street address for this contact, and nothing downstream can happen
+                without one — a visit needs somewhere to go and a quote needs a property to price.
+              </p>
+            )}
+            <PropertyForm
+              clientId={client.id}
+              current={prop ? {
+                address: prop.address,
+                city: prop.city,
+                postalCode: prop.postalCode,
+                floodZone: prop.floodZone,
+                accessNotes: prop.accessNotes,
+              } : undefined}
+            />
+          </Panel>
+
+          {prop && (
             <Panel>
               <SectionLabel>Openings on this property</SectionLabel>
-              <Table>
-                <thead><tr><Th>Opening</Th><Th>Type</Th><Th align="center">Width</Th><Th align="center">Protection height</Th><Th>Surface</Th></tr></thead>
-                <tbody>
-                  {openings.map((o) => (
-                    <tr key={o.id} className="text-ink-dim">
-                      <Td className="text-sm text-ink">{o.label}</Td>
-                      <Td className="text-xs capitalize">{o.type.replace(/_/g, " ")}</Td>
-                      <Td align="center" className="font-mono text-xs tabular-nums">
-                        {o.widthIn}&quot;
-                        {o.widthIn > 108 && <span className="ml-1 text-ember" title="Centre post required">•</span>}
-                      </Td>
-                      <Td align="center" className="font-mono text-xs tabular-nums">{o.protectionHeightIn}&quot;</Td>
-                      <Td className="text-xs">{o.surface}</Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
+              {openings.length > 0 ? (
+                <Table>
+                  <thead><tr><Th>Opening</Th><Th>Type</Th><Th align="center">Width</Th><Th align="center">Protection height</Th><Th>Surface</Th><Th align="right"> </Th></tr></thead>
+                  <tbody>
+                    {openings.map((o) => (
+                      <tr key={o.id} className="text-ink-dim">
+                        <Td className="text-sm text-ink">{o.label}</Td>
+                        <Td className="text-xs capitalize">{o.type.replace(/_/g, " ")}</Td>
+                        <Td align="center" className="font-mono text-xs tabular-nums">
+                          {o.widthIn}&quot;
+                          {o.widthIn > 108 && <span className="ml-1 text-ember" title="Centre post required">•</span>}
+                        </Td>
+                        <Td align="center" className="font-mono text-xs tabular-nums">{o.protectionHeightIn}&quot;</Td>
+                        <Td className="text-xs">{o.surface}</Td>
+                        <Td align="right">
+                          <OpsButton input={{ kind: "opening.remove", id: o.id }} variant="ghost" confirm="Remove">
+                            Remove
+                          </OpsButton>
+                        </Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              ) : (
+                <p className="text-sm text-ink-dim">
+                  Nothing measured yet. Openings are what a quote prices, so this is the assessment&apos;s output.
+                </p>
+              )}
+              <div className="mt-5 border-t border-line pt-5">
+                <OpeningForm propertyId={prop.id} />
+              </div>
             </Panel>
           )}
 

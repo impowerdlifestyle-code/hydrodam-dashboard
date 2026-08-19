@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { Bar, DemoNotice, EmptyState, PageHeader, Panel, RowLink, SectionLabel, StatCard, StatusPill, Table, Td, Th } from "@/components/ui";
-import { arAging, clientName, collectedSince, db } from "@/lib/db";
+import { Bar, SeedNotice, EmptyState, PageHeader, Panel, RowLink, SectionLabel, StatCard, StatusPill, Table, Td, Th } from "@/components/ui";
+import { DB_LIVE, arAging, clientName, collectedSince, db, ensureData } from "@/lib/db";
 import { compactMoney, money, shortDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +14,7 @@ const FILTERS = [
 ];
 
 export default async function InvoicesPage({ searchParams }: { searchParams: Promise<{ f?: string }> }) {
+  await ensureData();
   const { f = "outstanding" } = await searchParams;
   const d = db();
   const today = new Date().toISOString().slice(0, 10);
@@ -35,7 +36,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <DemoNotice what="Invoices, payments and AR aging." />
+      <SeedNotice what="Invoices, payments and AR aging." live={DB_LIVE} />
       <PageHeader title="Invoices" subtitle="Deposits, progress payments and balances — card and ACH." />
 
       <div className="grid gap-4 sm:grid-cols-3">

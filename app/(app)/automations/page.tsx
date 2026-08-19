@@ -1,6 +1,7 @@
 import { Badge, PageHeader, Panel, SectionLabel, StatCard, Table, Td, Th } from "@/components/ui";
 import { Icon } from "@/components/Icon";
-import { db } from "@/lib/db";
+import { OpsButton } from "@/components/Ops";
+import { db, ensureData } from "@/lib/db";
 import { shortDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +10,8 @@ export const metadata = { title: "Automations · HydroDam Ops" };
 const OFFSET_LABEL = (days: number[]) =>
   days.map((d) => (d === 0 ? "same day" : d < 0 ? `${-d}d before` : `+${d}d`)).join(", ");
 
-export default function AutomationsPage() {
+export default async function AutomationsPage() {
+  await ensureData();
   const d = db();
   const armed = d.automations.filter((a) => a.armed);
   const disarmed = d.automations.filter((a) => !a.armed);
@@ -58,6 +60,7 @@ export default function AutomationsPage() {
               <Th align="center">Cap</Th>
               <Th align="right">Sent 30d</Th>
               <Th>State</Th>
+              <Th align="right"> </Th>
             </tr>
           </thead>
           <tbody>
@@ -84,6 +87,15 @@ export default function AutomationsPage() {
                     <span className="h-1.5 w-1.5 rounded-full bg-current" />
                     {a.armed ? "Armed" : "Dry run"}
                   </Badge>
+                </Td>
+                <Td align="right">
+                  <OpsButton
+                    input={{ kind: "automation.toggle", id: a.id, armed: !a.armed }}
+                    variant={a.armed ? "outline" : "primary"}
+                    confirm={a.armed ? undefined : `Arm ${a.name}?`}
+                  >
+                    {a.armed ? "Disarm" : "Arm"}
+                  </OpsButton>
                 </Td>
               </tr>
             ))}

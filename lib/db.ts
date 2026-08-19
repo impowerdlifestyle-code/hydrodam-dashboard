@@ -3,111 +3,205 @@ import { buildSeed } from "@/lib/seed";
 import { CRM_LIVE, fetchCrm } from "@/lib/hubspot";
 import { phoneDisplay } from "@/lib/format";
 import { phoneKey, toE164 } from "@/lib/telnyx";
+import * as pg from "@/lib/supabase";
+import { SUPABASE_LIVE } from "@/lib/supabase";
+import { loadSnapshot, promoteClient, promoteRequest } from "@/lib/store";
+import { lineItemsFor, priceQuoteOpening, type OpeningSpec } from "@/lib/pricing";
 import type {
   Client, Conversation, Invoice, Job, Message, Opening, Payment, Property, Quote,
-  ServiceRequest, Snapshot, Staff, Visit,
+  Series, ServiceRequest, Snapshot, Staff, Visit,
 } from "@/lib/types";
 
 /**
  * Data access.
  *
- * Postgres (Supabase) is the intended system of record — the schema lives in
- * supabase/migrations/0001_init.sql. Until SUPABASE_URL is set, the app runs on
- * the seeded snapshot in lib/seed.ts so every screen is real and clickable.
+ * Postgres is the system of record. `lib/store.ts` reads the whole operating
+ * set into the flat Snapshot every screen already speaks, and `ensureData()`
+ * hydrates it at the top of each render. Reads below are pure functions over
+ * that object; writes go to Postgres and mark the snapshot stale.
  *
- * Mutations write to the in-process snapshot. That survives navigation on a warm
- * server but not a cold start, which is exactly the limitation the migration
- * removes. Nothing else in the app knows the difference.
+ * With SUPABASE_URL unset the app still runs — on `lib/seed.ts`, in-process,
+ * losing writes at the next cold start. That path exists so a developer can
+ * open the app without credentials, not as an operating mode.
  */
 
-export const DB_LIVE = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+export const DB_LIVE = SUPABASE_LIVE;
 
 // The snapshot hangs off globalThis rather than a module binding because Next
 // bundles route handlers and page renders separately — two module instances,
 // two snapshots. Without this, an SMS written by the Telnyx webhook would be
 // invisible to the Inbox that renders it.
 const SNAPSHOT = Symbol.for("hydrodam.snapshot");
-type SnapshotHost = typeof globalThis & { [SNAPSHOT]?: Snapshot };
+const HYDRATION = Symbol.for("hydrodam.hydration");
+
+type Hydration = { loadedAt: number; inFlight: Promise<void> | null };
+type Host = typeof globalThis & { [SNAPSHOT]?: Snapshot; [HYDRATION]?: Hydration };
+
+const host = () => globalThis as Host;
+
+const hydration = (): Hydration => {
+  const h = host();
+  if (!h[HYDRATION]) h[HYDRATION] = { loadedAt: 0, inFlight: null };
+  return h[HYDRATION];
+};
 
 export function db(): Snapshot {
-  const host = globalThis as SnapshotHost;
-  if (!host[SNAPSHOT]) {
+  const h = host();
+  if (!h[SNAPSHOT]) {
+    // Reached only before the first ensureData(), or with no database
+    // configured. Seeded people carry `demo: true` so the two CRM-backed
+    // screens can filter them out while jobs can still resolve a name.
     const seeded = buildSeed();
     for (const c of seeded.clients) c.demo = true;
     for (const r of seeded.requests) r.demo = true;
-    host[SNAPSHOT] = seeded;
+    h[SNAPSHOT] = seeded;
   }
-  return host[SNAPSHOT];
+  return h[SNAPSHOT];
+}
+
+/**
+ * How long a loaded snapshot is reused.
+ *
+ * Long enough that the dozen `db()` calls in one page render share a single
+ * sweep, short enough that a second browser tab sees a colleague's edit
+ * without a hard refresh. Every write calls `invalidate()`, so this window
+ * never delays your own changes.
+ */
+const SNAPSHOT_TTL_MS = 2_000;
+
+export function invalidate(): void {
+  hydration().loadedAt = 0;
 }
 
 // ---------------------------------------------------------------------- CRM
 //
-// HubSpot backs the people half of the app: Clients and Requests. Everything
-// downstream of a measurement — jobs, visits, invoices, materials — has no
-// source system yet and stays on the seeded demo rows until Supabase exists.
-//
-// Contacts are merged into the same snapshot the seed lives in, so every
-// existing lookup keeps working. Seeded people carry `demo: true` and are
-// filtered out of the two live screens; they remain so seeded jobs and invoices
-// can still resolve a client name.
-
-let crmLoadedAt = 0;
-let crmMeta: { contactCount: number; addressedCount: number; fetchedAt: string } | null = null;
-let inFlight: Promise<void> | null = null;
+// HubSpot holds ~3,000 contacts and remains the lead list. A contact becomes a
+// Postgres client only when ops does something durable with it, so the two
+// sources are merged for display: Postgres first, then any HubSpot lead that
+// has not been promoted.
 
 const CRM_TTL_MS = 10 * 60_000;
 
-export const crmStatus = () => ({ live: CRM_LIVE && crmMeta !== null, ...crmMeta });
+type Crm = Awaited<ReturnType<typeof fetchCrm>>;
 
-/**
- * Hydrates the snapshot from HubSpot. Safe to call on every render — it fetches
- * at most once per TTL per server instance, and concurrent callers share the
- * one in-flight request rather than each starting their own.
- */
-export async function ensureCrm(): Promise<void> {
+let crmCache: Crm = null;
+let crmLoadedAt = 0;
+let crmInFlight: Promise<void> | null = null;
+
+export const crmStatus = () => ({
+  live: CRM_LIVE && crmCache !== null,
+  contactCount: crmCache?.contactCount,
+  addressedCount: crmCache?.addressedCount,
+  fetchedAt: crmCache?.fetchedAt,
+});
+
+async function ensureCrmCache(): Promise<void> {
   if (!CRM_LIVE) return;
-  if (crmMeta && Date.now() - crmLoadedAt < CRM_TTL_MS) return;
-  if (inFlight) return inFlight;
+  if (crmCache && Date.now() - crmLoadedAt < CRM_TTL_MS) return;
+  if (crmInFlight) return crmInFlight;
 
-  inFlight = (async () => {
+  crmInFlight = (async () => {
     try {
       const crm = await fetchCrm();
-      if (!crm) return;
-      const d = db();
-      // SMS_LEAD_SOURCE rows were created by someone texting the Telnyx number.
-      // They have no HubSpot record yet, so a refresh must not wipe them.
-      d.clients = [...d.clients.filter((c) => c.demo || c.leadSource === SMS_LEAD_SOURCE), ...crm.clients];
-      d.properties = [...d.properties.filter((p) => !p.id.startsWith("hsp_")), ...crm.properties];
-      d.requests = [...d.requests.filter((r) => r.demo), ...crm.requests];
-      crmMeta = {
-        contactCount: crm.contactCount,
-        addressedCount: crm.addressedCount,
-        fetchedAt: crm.fetchedAt,
-      };
-      crmLoadedAt = Date.now();
+      if (crm) {
+        crmCache = crm;
+        crmLoadedAt = Date.now();
+      }
     } catch {
-      // A CRM outage must never take the dashboard down. Seed stays visible.
+      // A CRM outage must never take the dashboard down, and it must not blank
+      // the lead list either: the last good snapshot stays in place.
     } finally {
-      inFlight = null;
+      crmInFlight = null;
     }
   })();
 
-  return inFlight;
+  return crmInFlight;
 }
 
-/** Clients and Requests as the two live screens should see them. */
-export const liveClients = (): Client[] => (crmMeta ? db().clients.filter((c) => !c.demo) : db().clients);
-export const liveRequests = (): ServiceRequest[] => (crmMeta ? db().requests.filter((r) => !r.demo) : db().requests);
+/** Postgres rows first; unpromoted HubSpot leads layered on top for display. */
+function mergeCrm(snap: Snapshot): void {
+  if (!crmCache) return;
+
+  const promotedContacts = new Set<string>();
+  for (const c of snap.clients) if (c.hubspotContactId) promotedContacts.add(c.hubspotContactId);
+
+  const promotedRequests = new Set<string>();
+  for (const r of snap.requests) if (r.externalId) promotedRequests.add(r.externalId);
+
+  const leads = crmCache.clients.filter((c) => !c.hubspotContactId || !promotedContacts.has(c.hubspotContactId));
+  const leadIds = new Set(leads.map((c) => c.id));
+
+  snap.clients = [...snap.clients, ...leads];
+  snap.properties = [...snap.properties, ...crmCache.properties.filter((p) => leadIds.has(p.clientId))];
+  snap.requests = [...snap.requests, ...crmCache.requests.filter((r) => !promotedRequests.has(r.id))];
+}
+
+/**
+ * Hydrates the snapshot. Call once at the top of anything that reads data.
+ *
+ * Safe to call on every render: within the TTL it is a no-op, and concurrent
+ * callers share the one in-flight load rather than each starting their own.
+ */
+export async function ensureData(): Promise<void> {
+  const state = hydration();
+
+  if (!DB_LIVE) {
+    db();
+    await ensureCrmCache();
+    const snap = host()[SNAPSHOT]!;
+    // Without Postgres the seed IS the snapshot, so a re-merge would duplicate
+    // every lead. Rebuild the CRM half from the seeded rows each time instead.
+    snap.clients = snap.clients.filter((c) => c.demo || c.leadSource === SMS_LEAD_SOURCE);
+    snap.properties = snap.properties.filter((p) => !p.id.startsWith("hsp_"));
+    snap.requests = snap.requests.filter((r) => r.demo);
+    mergeCrm(snap);
+    return;
+  }
+
+  if (Date.now() - state.loadedAt < SNAPSHOT_TTL_MS) return;
+  if (state.inFlight) return state.inFlight;
+
+  state.inFlight = (async () => {
+    try {
+      const [snap] = await Promise.all([loadSnapshot(), ensureCrmCache()]);
+      mergeCrm(snap);
+      // One assignment at the end: a concurrent render sees either the whole
+      // old snapshot or the whole new one, never a half-built object.
+      host()[SNAPSHOT] = snap;
+      state.loadedAt = Date.now();
+    } finally {
+      state.inFlight = null;
+    }
+  })();
+
+  return state.inFlight;
+}
+
+/** Clients and Requests as the two lead-facing screens should see them. */
+export const liveClients = (): Client[] => db().clients.filter((c) => !c.demo);
+export const liveRequests = (): ServiceRequest[] => db().requests.filter((r) => !r.demo);
 
 // ------------------------------------------------------------------ lookups
 
-export const getClient = (id: string): Client | undefined => db().clients.find((c) => c.id === id);
+/**
+ * Lookups accept either id a row has ever had.
+ *
+ * A HubSpot lead is `hs_<contact>` until ops touches it, at which point it
+ * becomes a Postgres uuid and disappears from the merged lead list. Every link
+ * already rendered, every bookmark and every in-flight action still carries the
+ * old id, so these resolve it rather than 404-ing on work the user just did.
+ */
+export const getClient = (id: string): Client | undefined =>
+  db().clients.find((c) => c.id === id) ??
+  (id.startsWith("hs_") ? db().clients.find((c) => c.hubspotContactId === id.slice(3)) : undefined);
 export const getProperty = (id: string): Property | undefined => db().properties.find((p) => p.id === id);
 export const getQuote = (id: string): Quote | undefined => db().quotes.find((q) => q.id === id);
 export const getJob = (id: string): Job | undefined => db().jobs.find((j) => j.id === id);
 export const getInvoice = (id: string): Invoice | undefined => db().invoices.find((i) => i.id === id);
 export const getVisit = (id: string): Visit | undefined => db().visits.find((v) => v.id === id);
-export const getRequest = (id: string): ServiceRequest | undefined => db().requests.find((r) => r.id === id);
+export const getRequest = (id: string): ServiceRequest | undefined =>
+  db().requests.find((r) => r.id === id) ??
+  (id.startsWith("hsr_") ? db().requests.find((r) => r.externalId === id) : undefined);
 export const getStaff = (id: string): Staff | undefined => db().staff.find((s) => s.id === id);
 export const getConversation = (id: string): Conversation | undefined => db().conversations.find((c) => c.id === id);
 
@@ -115,7 +209,8 @@ export const clientName = (id: string): string => getClient(id)?.name ?? "Unknow
 export const staffName = (id: string): string => getStaff(id)?.name ?? "Unassigned";
 
 export function propertyFor(clientId: string): Property | undefined {
-  return db().properties.find((p) => p.clientId === clientId);
+  const id = getClient(clientId)?.id ?? clientId;
+  return db().properties.find((p) => p.clientId === id);
 }
 
 export function openingsFor(propertyId: string): Opening[] {
@@ -146,6 +241,22 @@ export function messagesFor(conversationId: string): Message[] {
 
 export function paymentsFor(invoiceId: string): Payment[] {
   return db().payments.filter((p) => p.invoiceId === invoiceId);
+}
+
+export function quoteFor(requestId: string): Quote | undefined {
+  return db().quotes.find((q) => q.requestId === requestId);
+}
+
+export function jobForQuote(quoteId: string): Job | undefined {
+  return db().jobs.find((j) => j.quoteId === quoteId);
+}
+
+export function invoicesForJob(jobId: string): Invoice[] {
+  return db().invoices.filter((i) => i.jobId === jobId);
+}
+
+export function materialsFor(jobId: string): { id: string; name: string; quantity: number; unit: string; unitCostCents: number }[] {
+  return db().materials.filter((m) => m.jobId === jobId);
 }
 
 // ------------------------------------------------------------------ schedule
@@ -359,82 +470,410 @@ export function crewUtilization(): { staffId: string; name: string; minutes: num
 }
 
 // ------------------------------------------------------------------ mutations
+//
+// Each of these writes to Postgres and then invalidates the snapshot, so the
+// re-render that follows a server action reads the row the database actually
+// holds rather than an optimistic copy. Without a database they fall back to
+// mutating the snapshot in place, which is enough to click through locally.
 
-export function updateVisit(id: string, patch: Partial<Visit>): Visit | undefined {
-  const v = db().visits.find((x) => x.id === id);
-  if (v) Object.assign(v, patch);
-  return v;
-}
-
-export function moveVisit(id: string, startISO: string, staffId?: string): Visit | undefined {
-  const v = db().visits.find((x) => x.id === id);
-  if (!v) return undefined;
-  const durationMs = Date.parse(v.scheduledEnd) - Date.parse(v.scheduledStart);
-  v.scheduledStart = startISO;
-  v.scheduledEnd = new Date(Date.parse(startISO) + durationMs).toISOString();
-  if (staffId) v.assignedTo = [staffId];
-  if (v.status === "unscheduled") v.status = "scheduled";
-  return v;
-}
-
-export function updateJob(id: string, patch: Partial<Job>): Job | undefined {
-  const j = db().jobs.find((x) => x.id === id);
-  if (j) Object.assign(j, patch);
-  return j;
-}
-
-export function updateQuote(id: string, patch: Partial<Quote>): Quote | undefined {
-  const q = db().quotes.find((x) => x.id === id);
-  if (q) Object.assign(q, patch);
-  return q;
-}
-
-export function updateRequest(id: string, patch: Partial<ServiceRequest>): ServiceRequest | undefined {
-  const r = db().requests.find((x) => x.id === id);
-  if (r) Object.assign(r, patch);
-  return r;
-}
-
-export function updateInvoice(id: string, patch: Partial<Invoice>): Invoice | undefined {
-  const i = db().invoices.find((x) => x.id === id);
-  if (i) Object.assign(i, patch);
-  return i;
-}
-
-export function recordPayment(invoiceId: string, amountCents: number, method: Payment["method"]): Payment | undefined {
-  const d = db();
-  const inv = d.invoices.find((i) => i.id === invoiceId);
-  if (!inv) return undefined;
-  const payment: Payment = {
-    id: `pay_${d.payments.length + 1}`,
-    invoiceId,
-    clientId: inv.clientId,
-    method,
-    status: method === "ach" ? "processing" : "succeeded",
-    amountCents,
-    feeCents: method === "ach" ? 500 : method === "card" ? Math.round(amountCents * 0.029) + 30 : 0,
-    receivedOn: new Date().toISOString().slice(0, 10),
-    expectedSettlementOn:
-      method === "ach" ? new Date(Date.now() + 4 * 86_400_000).toISOString().slice(0, 10) : undefined,
-  };
-  d.payments.push(payment);
-  if (payment.status === "succeeded") {
-    inv.amountPaidCents = Math.min(inv.totalCents, inv.amountPaidCents + amountCents);
-    if (inv.amountPaidCents >= inv.totalCents) {
-      inv.status = "paid";
-      inv.paidAt = new Date().toISOString();
-    } else if (inv.amountPaidCents > 0) {
-      inv.status = "partially_paid";
-    }
+/** A HubSpot lead has no Postgres row until ops touches it. This is that touch. */
+export async function realClientId(clientId: string): Promise<{ clientId: string; propertyId?: string }> {
+  const client = getClient(clientId);
+  if (!client) throw new Error(`No client ${clientId}`);
+  // Already promoted (or never a lead): getClient resolved it to the real row.
+  if (!DB_LIVE || !client.id.startsWith("hs_")) {
+    return { clientId: client.id, propertyId: propertyFor(client.id)?.id };
   }
-  return payment;
+
+  const promoted = await promoteClient(client, propertyFor(client.id));
+  invalidate();
+  return promoted;
 }
 
-export function sendMessage(
+/** The same, for a request: returns an id that can carry a quote or a visit. */
+export async function realRequestId(requestId: string): Promise<{ requestId: string; clientId: string; propertyId?: string }> {
+  const req = getRequest(requestId);
+  if (!req) throw new Error(`No request ${requestId}`);
+  if (!DB_LIVE || !req.id.startsWith("hsr_")) {
+    const { clientId, propertyId } = await realClientId(req.clientId);
+    return { requestId: req.id, clientId, propertyId: req.propertyId ?? propertyId };
+  }
+
+  const { clientId, propertyId } = await realClientId(req.clientId);
+  const id = await promoteRequest(req, clientId, propertyId);
+  invalidate();
+  return { requestId: id, clientId, propertyId };
+}
+
+export async function updateVisit(id: string, patch: Partial<Visit>): Promise<void> {
+  if (!DB_LIVE) {
+    const v = db().visits.find((x) => x.id === id);
+    if (v) Object.assign(v, patch);
+    return;
+  }
+  const values: Record<string, unknown> = {};
+  if (patch.status !== undefined) values.status = patch.status;
+  if (patch.crewNotes !== undefined) values.crew_notes = patch.crewNotes;
+  if (patch.enRouteAt !== undefined) values.en_route_at = patch.enRouteAt;
+  if (patch.checkedInAt !== undefined) values.checked_in_at = patch.checkedInAt;
+  if (patch.completedAt !== undefined) values.completed_at = patch.completedAt;
+  if (patch.routePosition !== undefined) values.route_position = patch.routePosition;
+  if (Object.keys(values).length === 0) return;
+
+  await pg.patch("visits", { id: `eq.${id}` }, values);
+  invalidate();
+}
+
+export async function moveVisit(id: string, startISO: string, staffIds?: string[]): Promise<void> {
+  const v = getVisit(id);
+  if (!v) return;
+  const durationMs = Math.max(30 * 60_000, Date.parse(v.scheduledEnd) - Date.parse(v.scheduledStart) || 0);
+  const endISO = new Date(Date.parse(startISO) + durationMs).toISOString();
+
+  if (!DB_LIVE) {
+    v.scheduledStart = startISO;
+    v.scheduledEnd = endISO;
+    if (staffIds) v.assignedTo = staffIds;
+    if (v.status === "unscheduled") v.status = "scheduled";
+    return;
+  }
+
+  await pg.rpc("api_visit_schedule", {
+    p_visit: id,
+    p_start: startISO,
+    p_end: endISO,
+    p_users: staffIds ?? v.assignedTo,
+  });
+  invalidate();
+}
+
+export async function createVisit(opts: {
+  jobId?: string;
+  requestId?: string;
+  kind: Visit["kind"];
+  title: string;
+  startISO?: string;
+  minutes?: number;
+  staffIds?: string[];
+}): Promise<string | undefined> {
+  if (!DB_LIVE) return undefined;
+  const end = opts.startISO
+    ? new Date(Date.parse(opts.startISO) + (opts.minutes ?? 120) * 60_000).toISOString()
+    : null;
+
+  const id = await pg.rpc<string>("api_visit_create", {
+    p_job: opts.jobId ?? null,
+    p_request: opts.requestId ?? null,
+    p_kind: opts.kind,
+    p_title: opts.title,
+    p_start: opts.startISO ?? null,
+    p_end: end,
+    p_users: opts.staffIds ?? [],
+  });
+  invalidate();
+  return id;
+}
+
+export async function updateJob(id: string, patch: Partial<Job>): Promise<void> {
+  if (!DB_LIVE) {
+    const j = db().jobs.find((x) => x.id === id);
+    if (j) Object.assign(j, patch);
+    return;
+  }
+  const values: Record<string, unknown> = {};
+  if (patch.status !== undefined) values.status = patch.status;
+  if (patch.fabricationStatus !== undefined) values.fabrication_status = patch.fabricationStatus;
+  if (patch.instructions !== undefined) values.instructions = patch.instructions;
+  if (patch.ownerId !== undefined) values.owner_id = patch.ownerId;
+  if (Object.keys(values).length === 0) return;
+
+  await pg.patch("jobs", { id: `eq.${id}` }, values);
+  invalidate();
+}
+
+export async function updateQuote(id: string, patch: Partial<Quote>): Promise<void> {
+  if (!DB_LIVE) {
+    const q = db().quotes.find((x) => x.id === id);
+    if (q) Object.assign(q, patch);
+    return;
+  }
+  const values: Record<string, unknown> = {};
+  if (patch.status !== undefined) {
+    values.status = patch.status;
+    if (patch.status === "sent") values.sent_at = new Date().toISOString();
+    if (patch.status === "viewed") values.first_viewed_at = new Date().toISOString();
+  }
+  if (patch.title !== undefined) values.title = patch.title;
+  if (patch.ownerId !== undefined) values.owner_id = patch.ownerId;
+  if (Object.keys(values).length === 0) return;
+
+  await pg.patch("quotes", { id: `eq.${id}` }, values);
+  invalidate();
+}
+
+export async function updateRequest(id: string, patch: Partial<ServiceRequest>): Promise<void> {
+  if (!DB_LIVE) {
+    const r = db().requests.find((x) => x.id === id);
+    if (r) Object.assign(r, patch);
+    return;
+  }
+  const values: Record<string, unknown> = {};
+  if (patch.status !== undefined) values.status = patch.status;
+  if (patch.assignedTo !== undefined) values.assigned_to = patch.assignedTo || null;
+  if (patch.details !== undefined) values.details = patch.details;
+  if (patch.firstResponseAt !== undefined) values.first_response_at = patch.firstResponseAt;
+  if (Object.keys(values).length === 0) return;
+
+  await pg.patch("requests", { id: `eq.${id}` }, values);
+  invalidate();
+}
+
+export async function updateInvoice(id: string, patch: Partial<Invoice>): Promise<void> {
+  if (!DB_LIVE) {
+    const i = db().invoices.find((x) => x.id === id);
+    if (i) Object.assign(i, patch);
+    return;
+  }
+  const values: Record<string, unknown> = {};
+  if (patch.status !== undefined) {
+    values.status = patch.status;
+    if (patch.status === "sent") values.sent_at = new Date().toISOString();
+  }
+  if (patch.dueDate !== undefined) values.due_date = patch.dueDate;
+  if (Object.keys(values).length === 0) return;
+
+  await pg.patch("invoices", { id: `eq.${id}` }, values);
+  invalidate();
+}
+
+export async function recordPayment(
+  invoiceId: string,
+  amountCents: number,
+  method: Payment["method"],
+  reference?: string
+): Promise<void> {
+  if (!DB_LIVE) {
+    const d = db();
+    const inv = d.invoices.find((i) => i.id === invoiceId);
+    if (!inv) return;
+    d.payments.push({
+      id: `pay_${d.payments.length + 1}`,
+      invoiceId,
+      clientId: inv.clientId,
+      method,
+      status: method === "ach" ? "processing" : "succeeded",
+      amountCents,
+      feeCents: method === "ach" ? 500 : method === "card" ? Math.round(amountCents * 0.029) + 30 : 0,
+      receivedOn: new Date().toISOString().slice(0, 10),
+    });
+    if (method !== "ach") {
+      inv.amountPaidCents = Math.min(inv.totalCents, inv.amountPaidCents + amountCents);
+      inv.status = inv.amountPaidCents >= inv.totalCents ? "paid" : "partially_paid";
+    }
+    return;
+  }
+
+  await pg.rpc("api_payment_record", {
+    p_invoice: invoiceId,
+    p_method: method,
+    p_amount_cents: amountCents,
+    p_reference: reference ?? null,
+  });
+  invalidate();
+}
+
+export async function createInvoice(
+  jobId: string,
+  kind: Invoice["kind"],
+  amountCents?: number,
+  title?: string
+): Promise<string | undefined> {
+  if (!DB_LIVE) return undefined;
+  const id = await pg.rpc<string>("api_invoice_create", {
+    p_job: jobId,
+    p_kind: kind,
+    p_amount_cents: amountCents ?? null,
+    p_title: title ?? null,
+    p_net_days: 7,
+  });
+  invalidate();
+  return id;
+}
+
+export async function approveQuote(quoteId: string, signerName: string, ip: string, userAgent: string, version: string, consentText: string): Promise<void> {
+  if (!DB_LIVE) {
+    const q = db().quotes.find((x) => x.id === quoteId);
+    if (q) {
+      q.status = "approved";
+      q.approvedAt = new Date().toISOString();
+      q.approvedByName = signerName;
+    }
+    return;
+  }
+  await pg.rpc("api_quote_approve", {
+    p_quote: quoteId,
+    p_signer_name: signerName,
+    p_ip: ip,
+    p_user_agent: userAgent,
+    p_agreement_version: version,
+    p_esign_consent: consentText,
+  });
+  invalidate();
+}
+
+/**
+ * The service address.
+ *
+ * HubSpot holds a street address for 140 of ~3,000 contacts, so for most leads
+ * this is where the address first exists. Writing one promotes the lead to a
+ * real client, because a property has to hang off a row that will still be
+ * there tomorrow.
+ */
+export async function saveProperty(
+  clientId: string,
+  values: {
+    label?: string;
+    address: string;
+    city: string;
+    postalCode: string;
+    floodZone?: string;
+    crsClass?: number;
+    accessNotes?: string;
+  }
+): Promise<string | undefined> {
+  if (!DB_LIVE) return undefined;
+  const { clientId: realId, propertyId } = await realClientId(clientId);
+
+  const row = {
+    label: values.label || "Service address",
+    address_line1: values.address,
+    city: values.city,
+    state: "FL",
+    postal_code: values.postalCode,
+    flood_zone: values.floodZone || null,
+    crs_class: values.crsClass ?? null,
+    access_notes: values.accessNotes || null,
+  };
+
+  if (propertyId) {
+    await pg.patch("properties", { id: `eq.${propertyId}` }, row);
+    invalidate();
+    return propertyId;
+  }
+
+  const company = await pg.rpc<string>("company_id", {});
+  const [created] = await pg.insert<{ id: string }>("properties", {
+    company_id: company,
+    client_id: realId,
+    is_primary: true,
+    ...row,
+  });
+  invalidate();
+  return created.id;
+}
+
+/** One protectable opening, measured on site. This is what a quote prices. */
+export async function addOpening(
+  propertyId: string,
+  values: { label: string; type: Opening["type"]; widthIn: number; protectionHeightIn: number; surface?: string }
+): Promise<void> {
+  if (!DB_LIVE) return;
+  const company = await pg.rpc<string>("company_id", {});
+  const existing = openingsFor(propertyId).length;
+
+  await pg.insert("openings", {
+    company_id: company,
+    property_id: propertyId,
+    label: values.label,
+    type: values.type,
+    width_in: values.widthIn,
+    protection_height_in: values.protectionHeightIn,
+    surface: values.surface || null,
+    sort_order: existing,
+  });
+  invalidate();
+}
+
+export async function removeOpening(id: string): Promise<void> {
+  if (!DB_LIVE) return;
+  await pg.remove("openings", { id: `eq.${id}` });
+  invalidate();
+}
+
+/**
+ * Prices a set of openings and writes the quote, its openings and its lines in
+ * one transaction. The arithmetic lives in lib/pricing.ts so the office and the
+ * public estimator quote the same opening at the same number.
+ */
+export async function createQuote(opts: {
+  clientId: string;
+  propertyId: string;
+  requestId?: string;
+  title: string;
+  series: Series;
+  specs: OpeningSpec[];
+  depositBps?: number;
+  discountCents?: number;
+}): Promise<string | undefined> {
+  if (!DB_LIVE) return undefined;
+
+  const openings = opts.specs.map((s) => {
+    const priced = priceQuoteOpening(s);
+    return {
+      opening_id: s.openingId ?? null,
+      label: priced.label,
+      type: priced.type,
+      width_in: priced.widthIn,
+      protection_height_in: priced.protectionHeightIn,
+      quantity: priced.quantity,
+      series: priced.series,
+      panel_count: priced.panelCount,
+      post_count: priced.postCount,
+      center_post_required: priced.centerPostRequired,
+      line_total_cents: priced.lineTotalCents,
+    };
+  });
+
+  const lines = lineItemsFor(opts.specs).map((l) => ({
+    kind: l.kind,
+    name: l.name,
+    quantity: l.quantity,
+    unit: l.unit,
+    unit_price_cents: l.unitPriceCents,
+    unit_cost_cents: l.unitCostCents,
+    is_taxable: l.taxable,
+    optional: l.optional,
+    selected: l.selected,
+  }));
+
+  const id = await pg.rpc<string>("api_quote_create", {
+    p_client: opts.clientId,
+    p_property: opts.propertyId,
+    p_request: opts.requestId ?? null,
+    p_title: opts.title,
+    p_series: opts.series,
+    p_openings: openings,
+    p_lines: lines,
+    p_deposit_bps: opts.depositBps ?? 5000,
+    p_discount_cents: opts.discountCents ?? 0,
+    p_valid_days: 30,
+  });
+  invalidate();
+  return id;
+}
+
+export async function convertQuoteToJob(quoteId: string): Promise<string | undefined> {
+  if (!DB_LIVE) return undefined;
+  const id = await pg.rpc<string>("api_quote_to_job", { p_quote: quoteId });
+  invalidate();
+  return id;
+}
+
+export async function sendMessage(
   conversationId: string,
   body: string,
   meta?: { providerId?: string; deliveryStatus?: Message["deliveryStatus"]; templateKey?: string }
-): Message | undefined {
+): Promise<Message | undefined> {
   const d = db();
   const conv = d.conversations.find((c) => c.id === conversationId);
   if (!conv) return undefined;
@@ -461,71 +900,145 @@ export function markConversationRead(conversationId: string): void {
   for (const m of db().messages) if (m.conversationId === conversationId) m.read = true;
 }
 
-export function saveChecklist(jobId: string, visitId: string, answers: Record<string, string>, submit: boolean, by: string) {
-  const d = db();
-  const job = d.jobs.find((j) => j.id === jobId);
-  if (!job) return undefined;
-  let sub = d.submissions.find((s) => s.visitId === visitId && s.templateKey === "qa_checklist");
-  if (!sub) {
-    sub = {
-      id: `fs_${d.submissions.length + 1}`,
-      templateKey: "qa_checklist",
-      jobId,
-      visitId,
-      clientId: job.clientId,
-      status: "draft",
-      answers: {},
-    };
-    d.submissions.push(sub);
+export async function saveChecklist(
+  jobId: string | undefined,
+  visitId: string,
+  answers: Record<string, string>,
+  submit: boolean,
+  by: string
+) {
+  if (!DB_LIVE) {
+    const d = db();
+    let sub = d.submissions.find((s) => s.visitId === visitId && s.templateKey === "qa_checklist");
+    if (!sub) {
+      sub = {
+        id: `fs_${d.submissions.length + 1}`,
+        templateKey: "qa_checklist",
+        jobId,
+        visitId,
+        clientId: getVisit(visitId)?.clientId ?? "",
+        status: "draft",
+        answers: {},
+      };
+      d.submissions.push(sub);
+    }
+    sub.answers = { ...sub.answers, ...answers };
+    if (submit) {
+      sub.status = "submitted";
+      sub.submittedAt = new Date().toISOString();
+      sub.submittedByName = by;
+    }
+    return sub;
   }
-  sub.answers = { ...sub.answers, ...answers };
-  if (submit) {
-    sub.status = "submitted";
-    sub.submittedAt = new Date().toISOString();
-    sub.submittedByName = by;
-  }
-  return sub;
+
+  await pg.rpc("api_checklist_save", {
+    p_visit: visitId,
+    p_answers: answers,
+    p_submit: submit,
+    p_by: by,
+  });
+  invalidate();
 }
 
 export function checklistFor(visitId: string) {
   return db().submissions.find((s) => s.visitId === visitId && s.templateKey === "qa_checklist");
 }
 
-export function clockIn(userId: string, jobId?: string, visitId?: string) {
-  const d = db();
-  const staffRow = d.staff.find((s) => s.id === userId);
-  const entry = {
-    id: `t_${d.timeEntries.length + 1}`,
-    userId,
-    jobId,
-    visitId,
-    startedAt: new Date().toISOString(),
-    breakMinutes: 0,
-    activity: "install" as const,
-    costRateCentsPerHour: staffRow?.costRateCentsPerHour ?? 0,
-  };
-  d.timeEntries.push(entry);
-  return entry;
+export function checklistForJob(jobId: string) {
+  return db().submissions.find((s) => s.jobId === jobId && s.templateKey === "qa_checklist" && s.status === "submitted");
 }
 
-export function clockOut(userId: string) {
-  const open = db().timeEntries.filter((t) => t.userId === userId && !t.endedAt).pop();
-  if (open) open.endedAt = new Date().toISOString();
-  return open;
+export async function clockIn(userId: string, jobId?: string, visitId?: string) {
+  if (!DB_LIVE) {
+    const d = db();
+    const staffRow = d.staff.find((s) => s.id === userId);
+    const entry = {
+      id: `t_${d.timeEntries.length + 1}`,
+      userId,
+      jobId,
+      visitId,
+      startedAt: new Date().toISOString(),
+      breakMinutes: 0,
+      activity: "install" as const,
+      costRateCentsPerHour: staffRow?.costRateCentsPerHour ?? 0,
+    };
+    d.timeEntries.push(entry);
+    return entry;
+  }
+  await pg.rpc("api_clock_in", {
+    p_user: userId,
+    p_job: jobId ?? null,
+    p_visit: visitId ?? null,
+    p_activity: "install",
+  });
+  invalidate();
+}
+
+export async function clockOut(userId: string) {
+  if (!DB_LIVE) {
+    const open = db().timeEntries.filter((t) => t.userId === userId && !t.endedAt).pop();
+    if (open) open.endedAt = new Date().toISOString();
+    return open;
+  }
+  await pg.rpc("api_clock_out", { p_user: userId, p_break_minutes: 0 });
+  invalidate();
 }
 
 export function openTimeEntry(userId: string) {
   return db().timeEntries.find((t) => t.userId === userId && !t.endedAt);
 }
 
-export function toggleAutomation(id: string, armed: boolean) {
-  const a = db().automations.find((x) => x.id === id);
-  if (a) {
-    a.armed = armed;
-    if (armed && !a.epochAt) a.epochAt = new Date().toISOString();
+export async function toggleAutomation(id: string, armed: boolean) {
+  if (!DB_LIVE) {
+    const a = db().automations.find((x) => x.id === id);
+    if (a) {
+      a.armed = armed;
+      if (armed && !a.epochAt) a.epochAt = new Date().toISOString();
+    }
+    return;
   }
-  return a;
+  await pg.rpc("api_automation_toggle", { p_id: id, p_armed: armed });
+  invalidate();
 }
+
+export async function addTeammate(opts: {
+  name: string;
+  email: string;
+  phone?: string;
+  role: Staff["role"];
+  costRateCentsPerHour: number;
+}): Promise<void> {
+  if (!DB_LIVE) return;
+  const company = await pg.rpc<string>("company_id", {});
+  await pg.insert(
+    "users",
+    {
+      company_id: company,
+      full_name: opts.name,
+      email: opts.email,
+      phone: opts.phone || null,
+      role: opts.role,
+      cost_rate_cents_per_hour: opts.costRateCentsPerHour,
+      color: CREW_COLORS[Math.abs(hash(opts.email)) % CREW_COLORS.length],
+    },
+    { onConflict: "company_id,email" }
+  );
+  invalidate();
+}
+
+export async function setTeammateActive(id: string, active: boolean): Promise<void> {
+  if (!DB_LIVE) return;
+  await pg.patch("users", { id: `eq.${id}` }, { is_active: active });
+  invalidate();
+}
+
+const CREW_COLORS = ["#1f8ab3", "#cc551e", "#2fbf71", "#bf7c58", "#7eabb9", "#9b6dd6"];
+
+const hash = (s: string): number => {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return h;
+};
 
 // ------------------------------------------------------- time-relative reads
 // These wrap Date.now() so components stay pure — React's lint rule (correctly)
@@ -547,6 +1060,8 @@ export function daysOverdue(dueDate?: string): number {
   if (!dueDate) return 0;
   return Math.round((Date.now() - Date.parse(dueDate)) / 86_400_000);
 }
+
+export const nowISO = (): string => new Date().toISOString();
 
 // ----------------------------------------------------------------- inbound SMS
 //
@@ -667,3 +1182,6 @@ export function smsGate(client: Client | undefined, kind: "reply" | "marketing")
   }
   return { ok: true };
 }
+
+/** Kept for call sites that predate ensureData(). */
+export const ensureCrm = ensureData;

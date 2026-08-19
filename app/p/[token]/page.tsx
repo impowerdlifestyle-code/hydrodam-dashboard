@@ -4,6 +4,7 @@ import { Badge, Stepper } from "@/components/ui";
 import { JOURNEY } from "@/lib/data";
 import {
   db, getClient, getQuote, invoicesFor, jobsFor, nextVisitFor, propertyFor, quotesFor,
+  ensureData,
 } from "@/lib/db";
 import { longDate, money, shortDate, timeRange } from "@/lib/format";
 
@@ -25,6 +26,7 @@ function resolveToken(token: string): string | null {
 }
 
 export default async function PortalPage({ params }: { params: Promise<{ token: string }> }) {
+  await ensureData();
   const { token } = await params;
   const clientId = resolveToken(token);
   if (!clientId) notFound();

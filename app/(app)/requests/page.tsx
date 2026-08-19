@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { EmptyState, PageHeader, Panel, RowLink, StatCard, StatusPill, Table, Td, Th } from "@/components/ui";
-import { clientName, crmStatus, db, ensureCrm, liveRequests, propertyFor, staffName } from "@/lib/db";
+import { clientName, crmStatus, db, ensureData, liveRequests, propertyFor, staffName } from "@/lib/db";
 import { money, relative } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +23,7 @@ export default async function RequestsPage({
 }: {
   searchParams: Promise<{ f?: string; q?: string; p?: string }>;
 }) {
-  await ensureCrm();
+  await ensureData();
   const { f = "open", q = "", p = "1" } = await searchParams;
   const filter = FILTERS.find((x) => x.key === f) ?? FILTERS[0];
   const crm = crmStatus();

@@ -81,6 +81,8 @@ export type ServiceRequest = {
   assignedTo?: string;
   createdAt: string;
   firstResponseAt?: string;
+  /** The id this came in under. `hsr_<contact>` for a lead promoted from HubSpot. */
+  externalId?: string;
   /** Seeded demo row. Hidden from Clients/Requests once the CRM is connected. */
   demo?: boolean;
 };

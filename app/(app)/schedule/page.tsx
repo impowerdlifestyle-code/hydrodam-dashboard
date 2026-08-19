@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Icon } from "@/components/Icon";
-import { Avatar, DemoNotice, EmptyState, PageHeader, Panel, SectionLabel, StatusPill } from "@/components/ui";
-import { clientName, db, getStaff, propertyFor, visitsBetween } from "@/lib/db";
+import { Avatar, EmptyState, PageHeader, Panel, SectionLabel, StatusPill } from "@/components/ui";
+import { RescheduleForm } from "@/components/OpsForms";
+import { clientName, db, getStaff, propertyFor, visitsBetween, ensureData } from "@/lib/db";
 import { timeOfDay, timeRange } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +22,7 @@ function startOfWeek(d: Date): Date {
 }
 
 export default async function SchedulePage({ searchParams }: { searchParams: Promise<{ w?: string; view?: string }> }) {
+  await ensureData();
   const { w = "0", view = "week" } = await searchParams;
   const weekOffset = Number.parseInt(w, 10) || 0;
   const weekStart = new Date(startOfWeek(new Date()).getTime() + weekOffset * 7 * DAY_MS);
@@ -38,7 +40,6 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <DemoNotice what="The dispatch board and every visit on it." />
       <PageHeader
         title="Schedule"
         subtitle="Dispatch board — every visit, every crew, one week at a time."
@@ -158,6 +159,9 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                   <p className="text-xs text-ink-dim">{v.title}</p>
                   <p className="mt-1 text-[11px] text-ink-faint">{propertyFor(v.clientId)?.city}</p>
                   <div className="mt-2"><StatusPill status={v.status} /></div>
+                  <div className="mt-3 border-t border-ember/20 pt-3">
+                    <RescheduleForm visitId={v.id} crew={crew} current={v.assignedTo} />
+                  </div>
                 </li>
               ))}
             </ul>

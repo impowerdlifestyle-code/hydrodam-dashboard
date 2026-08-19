@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge, LinkButton, Money, PageHeader, Panel, SectionLabel, StatusPill, Table, Td, Th } from "@/components/ui";
-import { clientName, daysOverdue, getClient, getInvoice, getJob, paymentsFor } from "@/lib/db";
+import { OpsButton, OpsGroup } from "@/components/Ops";
+import { RecordPaymentForm } from "@/components/OpsForms";
+import { clientName, daysOverdue, getClient, getInvoice, getJob, paymentsFor, ensureData } from "@/lib/db";
 import { money, shortDate, dateTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +13,7 @@ const METHOD_LABEL: Record<string, string> = {
 };
 
 export default async function InvoiceDetail({ params }: { params: Promise<{ id: string }> }) {
+  await ensureData();
   const { id } = await params;
   const inv = getInvoice(id);
   if (!inv) notFound();
@@ -35,10 +38,19 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
         title={`Invoice #${inv.number}`}
         subtitle={`${clientName(inv.clientId)} · issued ${shortDate(inv.issueDate)} · due ${shortDate(inv.dueDate)}`}
         action={
-          <div className="flex flex-wrap gap-2">
-            {balance > 0 && <LinkButton href={`/invoices/${inv.id}`} icon="send">Send reminder</LinkButton>}
+          <OpsGroup>
+            {inv.status === "draft" && (
+              <OpsButton input={{ kind: "invoice.send", id: inv.id }} variant="primary" icon="send">
+                Mark as sent
+              </OpsButton>
+            )}
+            {inv.status !== "void" && inv.status !== "paid" && (
+              <OpsButton input={{ kind: "invoice.void", id: inv.id }} variant="outline" confirm="Confirm void">
+                Void
+              </OpsButton>
+            )}
             {job && <LinkButton href={`/jobs/${job.id}`} variant="outline" icon="wrench">Job #{job.number}</LinkButton>}
-          </div>
+          </OpsGroup>
         }
       />
 
@@ -122,8 +134,14 @@ export default async function InvoiceDetail({ params }: { params: Promise<{ id: 
                 </div>
               </div>
               <p className="mt-3 text-xs text-ink-faint">
-                Live payment links need Stripe connected to HydroDam&apos;s own account.
+                Self-serve payment links need Stripe connected to HydroDam&apos;s own account. Until
+                then, record what arrives here.
               </p>
+
+              <div className="mt-5 border-t border-line pt-5">
+                <SectionLabel>Record a payment</SectionLabel>
+                <RecordPaymentForm invoiceId={inv.id} balanceCents={balance} />
+              </div>
             </Panel>
           )}
 

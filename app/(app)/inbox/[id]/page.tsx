@@ -3,13 +3,14 @@ import { notFound } from "next/navigation";
 import { Badge, PageHeader, Panel, SectionLabel } from "@/components/ui";
 import { ReplyComposer } from "@/components/ReplyComposer";
 import { clientOn, getConversation, markRead, messagesIn } from "@/lib/comms";
-import { propertyFor, smsGate } from "@/lib/db";
+import { propertyFor, smsGate, ensureData } from "@/lib/db";
 import { dateTime, phoneDisplay, relative } from "@/lib/format";
 import { TELNYX_LIVE } from "@/lib/telnyx";
 
 export const dynamic = "force-dynamic";
 
 export default async function ThreadPage({ params }: { params: Promise<{ id: string }> }) {
+  await ensureData();
   const { id } = await params;
   const conv = await getConversation(id);
   if (!conv) notFound();

@@ -1,16 +1,18 @@
 import Link from "next/link";
 import { Badge, PageHeader, Panel, SectionLabel, Table, Td, Th } from "@/components/ui";
-import { db, getRequest, propertyFor } from "@/lib/db";
+import { db, getRequest, propertyFor, ensureData } from "@/lib/db";
 import {
   DEPLOY_KIT_PER_OPENING_CENTS, INSTALL_PER_OPENING_CENTS, PANEL_HEIGHT_IN,
   POST_COST_EACH_CENTS, SERIES_RATE_PER_SQFT_CENTS, panelCountFor, priceOpening,
-} from "@/lib/seed";
+} from "@/lib/pricing";
+import { QuoteFromRequestForm } from "@/components/OpsForms";
 import { money } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "New quote · HydroDam Ops" };
 
 export default async function NewQuotePage({ searchParams }: { searchParams: Promise<{ request?: string }> }) {
+  await ensureData();
   const { request } = await searchParams;
   const req = request ? getRequest(request) : undefined;
   const prop = req ? propertyFor(req.clientId) : undefined;
@@ -86,13 +88,8 @@ export default async function NewQuotePage({ searchParams }: { searchParams: Pro
               ))}
             </tbody>
           </Table>
-          <div className="mt-5 flex flex-wrap gap-2">
-            <button className="rounded-xl bg-teal px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90">
-              Build Sentinel quote
-            </button>
-            <button className="rounded-xl bg-teal/15 px-4 py-2.5 text-sm font-semibold text-teal ring-1 ring-line-bright transition-colors hover:bg-teal/25">
-              Build Onyx quote
-            </button>
+          <div className="mt-5 border-t border-line pt-5">
+            <QuoteFromRequestForm requestId={req!.id} openingCount={openings.length} />
           </div>
         </Panel>
       ) : (

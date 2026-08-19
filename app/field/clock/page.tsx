@@ -1,10 +1,12 @@
 import { Avatar, StatusPill } from "@/components/ui";
-import { clientName, db, getStaff, openTimeEntry, todaysVisits } from "@/lib/db";
+import { ClockControl } from "@/components/OpsForms";
+import { clientName, db, getStaff, openTimeEntry, todaysVisits, ensureData } from "@/lib/db";
 import { hoursMinutes, money, timeOfDay } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-export default function ClockPage() {
+export default async function ClockPage() {
+  await ensureData();
   const d = db();
   const crew = d.staff.filter((s) => s.role === "crew");
   const today = todaysVisits();
@@ -25,6 +27,10 @@ export default function ClockPage() {
             return sum + Math.max(0, (Date.parse(t.endedAt) - Date.parse(t.startedAt)) / 60_000 - t.breakMinutes);
           }, 0);
           const job = open?.jobId ? d.jobs.find((j) => j.id === open.jobId) : undefined;
+          // Clocking in attaches to whatever this person is next on site for, so
+          // the hours land on the right job without anyone picking from a list.
+          const nextVisit = today.find((v) => v.assignedTo.includes(s.id));
+          const openJob = nextVisit?.jobId ? d.jobs.find((j) => j.id === nextVisit.jobId) : undefined;
 
           return (
             <div key={s.id} className="panel rounded-2xl p-4">
@@ -52,13 +58,14 @@ export default function ClockPage() {
                 <span className="font-mono text-sm tabular-nums text-ink-dim">{money(s.costRateCentsPerHour, true)}/h</span>
               </div>
 
-              <button
-                className={`mt-3 w-full rounded-xl py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 ${
-                  open ? "bg-ember" : "bg-teal"
-                }`}
-              >
-                {open ? "Clock out" : "Clock in"}
-              </button>
+              <div className="mt-3">
+                <ClockControl
+                  userId={s.id}
+                  jobId={openJob?.id}
+                  visitId={nextVisit?.id}
+                  open={Boolean(open)}
+                />
+              </div>
             </div>
           );
         })}

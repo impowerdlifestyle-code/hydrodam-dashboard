@@ -1,21 +1,38 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Badge, KeyValue, LinkButton, PageHeader, Panel, SectionLabel, StatusPill } from "@/components/ui";
-import { db, ensureCrm, getClient, getRequest, propertyFor, staffName } from "@/lib/db";
+import { Badge, KeyValue, PageHeader, Panel, SectionLabel, StatusPill } from "@/components/ui";
+import { OpsSelect } from "@/components/Ops";
+import { PropertyForm, QuoteFromRequestForm, ScheduleVisitForm } from "@/components/OpsForms";
+import { db, ensureData, getClient, getRequest, openingsFor, propertyFor, quoteFor, staffName } from "@/lib/db";
 import { dateTime, money, phoneDisplay, relative } from "@/lib/format";
+import type { RequestStatus } from "@/lib/types";
+
+/** Only the moves 0001's status_transitions table will actually accept. */
+const NEXT_STATUS: Record<RequestStatus, RequestStatus[]> = {
+  new: ["contacted", "assessment_scheduled", "unqualified"],
+  contacted: ["assessment_scheduled", "unqualified"],
+  assessment_scheduled: ["assessed"],
+  assessed: ["converted", "unqualified"],
+  converted: [],
+  unqualified: ["contacted"],
+};
 
 export const dynamic = "force-dynamic";
 // First render of a cold instance pages ~3,000 HubSpot contacts.
 export const maxDuration = 60;
 
 export default async function RequestDetail({ params }: { params: Promise<{ id: string }> }) {
-  await ensureCrm();
+  await ensureData();
   const { id } = await params;
   const r = getRequest(id);
   if (!r) notFound();
 
   const client = getClient(r.clientId);
   const prop = r.propertyId ? db().properties.find((p) => p.id === r.propertyId) : propertyFor(r.clientId);
+  const crew = db().staff.filter((s) => s.active);
+  const openings = prop ? openingsFor(prop.id) : [];
+  const existingQuote = quoteFor(r.id);
+  const statusOptions = [r.status, ...NEXT_STATUS[r.status]];
   const responseMins = r.firstResponseAt
     ? Math.round((Date.parse(r.firstResponseAt) - Date.parse(r.createdAt)) / 60_000)
     : null;
@@ -29,12 +46,6 @@ export default async function RequestDetail({ params }: { params: Promise<{ id: 
       <PageHeader
         title={r.title}
         subtitle={`Request #${r.number} · ${r.source} · ${relative(r.createdAt)}`}
-        action={
-          <div className="flex flex-wrap gap-2">
-            <LinkButton href={`/quotes/new?request=${r.id}`} icon="file">Build quote</LinkButton>
-            <LinkButton href="/schedule" variant="secondary" icon="calendar">Book assessment</LinkButton>
-          </div>
-        }
       />
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -56,18 +67,55 @@ export default async function RequestDetail({ params }: { params: Promise<{ id: 
           </Panel>
 
           <Panel>
+            <SectionLabel>Next step</SectionLabel>
+            {existingQuote ? (
+              <p className="text-sm text-ink-dim">
+                Quoted already —{" "}
+                <Link href={`/quotes/${existingQuote.id}`} className="text-teal hover:underline">
+                  quote #{existingQuote.number}
+                </Link>
+                .
+              </p>
+            ) : (
+              <div className="grid gap-6 md:grid-cols-2">
+                <div>
+                  <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-ink-faint">
+                    Book the assessment
+                  </p>
+                  <ScheduleVisitForm requestId={r.id} crew={crew} kinds={["assessment"]} />
+                </div>
+                <div>
+                  <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-ink-faint">
+                    Or price it now
+                  </p>
+                  <QuoteFromRequestForm requestId={r.id} openingCount={openings.length} />
+                </div>
+              </div>
+            )}
+          </Panel>
+
+          <Panel>
             <SectionLabel>Property</SectionLabel>
             {prop ? (
-              <KeyValue
-                rows={[
-                  ["Address", `${prop.address}, ${prop.city} ${prop.postalCode}`],
-                  ["Flood zone", prop.floodZone ?? "Unknown"],
-                  ["CRS class", prop.crsClass ? `Class ${prop.crsClass}` : "—"],
-                  ["Access notes", prop.accessNotes ?? "—"],
-                ]}
-              />
+              <>
+                <KeyValue
+                  rows={[
+                    ["Address", `${prop.address}, ${prop.city} ${prop.postalCode}`],
+                    ["Flood zone", prop.floodZone ?? "Unknown"],
+                    ["CRS class", prop.crsClass ? `Class ${prop.crsClass}` : "—"],
+                    ["Access notes", prop.accessNotes ?? "—"],
+                  ]}
+                />
+                <p className="mt-4 text-xs text-ink-faint">
+                  {openings.length} opening{openings.length === 1 ? "" : "s"} measured.{" "}
+                  <Link href={`/clients/${r.clientId}`} className="text-teal hover:underline">
+                    Measure the property
+                  </Link>
+                  .
+                </p>
+              </>
             ) : (
-              <p className="text-sm text-ink-dim">No property on file yet — captured at the assessment.</p>
+              <PropertyForm clientId={r.clientId} />
             )}
           </Panel>
         </div>
@@ -82,16 +130,28 @@ export default async function RequestDetail({ params }: { params: Promise<{ id: 
               )}
               {responseMins === null && r.status === "new" && <Badge tone="bad">No reply yet</Badge>}
             </div>
-            <dl className="mt-4 flex flex-col gap-3">
+            <div className="mt-4 flex flex-col gap-3">
+              {statusOptions.length > 1 ? (
+                <OpsSelect
+                  label="Move to"
+                  input={{ kind: "request.status", id: r.id }}
+                  field="status"
+                  value={r.status}
+                  options={statusOptions.map((s) => ({ value: s, label: s.replace(/_/g, " ") }))}
+                />
+              ) : null}
+              <OpsSelect
+                label="Owner"
+                input={{ kind: "request.assign", id: r.id }}
+                field="userId"
+                value={r.assignedTo ?? ""}
+                options={[{ value: "", label: "Unassigned" }, ...crew.map((s) => ({ value: s.id, label: s.name }))]}
+              />
               <div>
                 <dt className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">Received</dt>
                 <dd className="text-sm text-ink">{dateTime(r.createdAt)}</dd>
               </div>
-              <div>
-                <dt className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">Owner</dt>
-                <dd className="text-sm text-ink">{r.assignedTo ? staffName(r.assignedTo) : "Unassigned"}</dd>
-              </div>
-            </dl>
+            </div>
           </Panel>
 
           {client && (

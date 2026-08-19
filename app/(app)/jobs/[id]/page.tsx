@@ -5,9 +5,25 @@ import {
   Avatar, Badge, KeyValue, LinkButton, Money, PageHeader, Panel, ProgressBar, SectionLabel,
   StatusPill, Table, Td, Th,
 } from "@/components/ui";
+import { OpsButton, OpsGroup, OpsSelect } from "@/components/Ops";
+import { RaiseInvoiceForm, ScheduleVisitForm } from "@/components/OpsForms";
 import { QA_CHECKLIST, allFields } from "@/lib/forms";
-import { clientName, db, getClient, getJob, getProperty, getQuote, getStaff, jobCosting, visitsForJob } from "@/lib/db";
+import { clientName, db, getClient, getJob, getProperty, getQuote, getStaff, jobCosting, visitsForJob, ensureData } from "@/lib/db";
 import { dateTime, hoursMinutes, longDate, money, shortDate, timeRange } from "@/lib/format";
+import type { JobStatus } from "@/lib/types";
+
+/** Mirrors 0001's status_transitions rows — anything else the database refuses. */
+const NEXT_JOB_STATUS: Record<JobStatus, JobStatus[]> = {
+  pending: ["scheduled"],
+  scheduled: ["in_progress", "on_hold", "pending"],
+  in_progress: ["completed", "on_hold"],
+  on_hold: ["scheduled", "in_progress"],
+  completed: ["invoiced", "in_progress"],
+  invoiced: ["closed", "completed"],
+  closed: [],
+};
+
+const FAB_STAGES = ["not_started", "cut_sheet_ready", "in_fabrication", "qc_passed", "ready_for_install"];
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +33,7 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 export default async function JobDetail({ params }: { params: Promise<{ id: string }> }) {
+  await ensureData();
   const { id } = await params;
   const job = getJob(id);
   if (!job) notFound();
@@ -45,17 +62,45 @@ export default async function JobDetail({ params }: { params: Promise<{ id: stri
         title={`Job #${job.number}`}
         subtitle={`${clientName(job.clientId)} · ${prop?.address}, ${prop?.city} ${prop?.postalCode}`}
         action={
-          <div className="flex flex-wrap gap-2">
-            <LinkButton href={`/field/visit/${visits[0]?.id ?? ""}`} variant="secondary" icon="truck">Field view</LinkButton>
+          <OpsGroup>
+            {job.status === "completed" && (
+              <OpsButton input={{ kind: "job.status", id: job.id, status: "invoiced" }} variant="primary" icon="dollar">
+                Mark invoiced
+              </OpsButton>
+            )}
+            {job.status === "invoiced" && (
+              <OpsButton input={{ kind: "job.status", id: job.id, status: "closed" }} variant="primary" icon="check">
+                Close the job
+              </OpsButton>
+            )}
+            {visits[0] && <LinkButton href={`/field/visit/${visits[0].id}`} variant="secondary" icon="truck">Field view</LinkButton>}
             {quote && <LinkButton href={`/quotes/${quote.id}`} variant="outline" icon="file">Quote #{quote.number}</LinkButton>}
-          </div>
+          </OpsGroup>
         }
       />
 
       <div className="mb-6 flex flex-wrap items-center gap-2">
         <StatusPill status={job.status} />
-        <Badge tone="teal">Fabrication: {job.fabricationStatus.replace(/_/g, " ")}</Badge>
         {job.warrantyEndsOn && <Badge tone="good">Warranty to {longDate(job.warrantyEndsOn)}</Badge>}
+      </div>
+
+      <div className="mb-6 grid gap-3 sm:grid-cols-2">
+        {NEXT_JOB_STATUS[job.status].length > 0 && (
+          <OpsSelect
+            label="Job status"
+            input={{ kind: "job.status", id: job.id }}
+            field="status"
+            value={job.status}
+            options={[job.status, ...NEXT_JOB_STATUS[job.status]].map((v) => ({ value: v, label: v.replace(/_/g, " ") }))}
+          />
+        )}
+        <OpsSelect
+          label="Fabrication"
+          input={{ kind: "job.fabrication", id: job.id }}
+          field="stage"
+          value={job.fabricationStatus}
+          options={FAB_STAGES.map((v) => ({ value: v, label: v.replace(/_/g, " ") }))}
+        />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -66,6 +111,15 @@ export default async function JobDetail({ params }: { params: Promise<{ id: stri
               <p className="text-sm leading-relaxed text-ink">{job.instructions}</p>
             </Panel>
           )}
+
+          <Panel>
+            <SectionLabel>Schedule a visit</SectionLabel>
+            <ScheduleVisitForm
+              jobId={job.id}
+              crew={d.staff.filter((s) => s.active)}
+              kinds={["install", "measure", "service", "thirty_day_check"]}
+            />
+          </Panel>
 
           <Panel>
             <SectionLabel>Visits</SectionLabel>
@@ -154,6 +208,11 @@ export default async function JobDetail({ params }: { params: Promise<{ id: stri
               <Row label="Collected" value={<Money cents={cost.collectedCents} tone="good" />} />
               <Row label="Outstanding" value={<Money cents={cost.invoicedCents - cost.collectedCents} tone={cost.invoicedCents > cost.collectedCents ? "bad" : undefined} />} />
             </div>
+          </Panel>
+
+          <Panel>
+            <SectionLabel>Raise an invoice</SectionLabel>
+            <RaiseInvoiceForm jobId={job.id} />
           </Panel>
 
           <Panel>

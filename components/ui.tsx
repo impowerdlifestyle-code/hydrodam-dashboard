@@ -286,16 +286,22 @@ export function Bar({ label, value, max, hint }: { label: string; value: number;
   );
 }
 
-export function DemoNotice({ what }: { what: string }) {
+/**
+ * Shown only when SUPABASE_URL is unset, i.e. the screen is rendering the
+ * in-process seed rather than the database. With Postgres connected these rows
+ * are real and no such banner appears.
+ */
+export function SeedNotice({ what, live }: { what: string; live: boolean }) {
+  if (live) return null;
   return (
     <div className="mb-6 flex items-start gap-3 rounded-xl border border-warn/30 bg-warn/[0.06] px-4 py-3">
       <span className="mt-0.5 shrink-0 text-warn">
         <Icon name="alert" size={16} />
       </span>
       <p className="text-xs leading-relaxed text-ink-dim">
-        <span className="font-semibold text-warn">Demo data.</span> {what} HydroDam has no system of
-        record for this yet — HubSpot holds leads only, and there are no closed-won deals in it. These
-        rows are illustrative and become real once jobs are entered against the database.
+        <span className="font-semibold text-warn">Seed data.</span> {what} No database is configured,
+        so these rows come from the built-in sample set and any change you make is lost when the
+        server restarts. Set <span className="font-mono text-ink">SUPABASE_URL</span> to make them real.
       </p>
     </div>
   );

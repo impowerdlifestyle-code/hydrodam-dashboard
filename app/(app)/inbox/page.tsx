@@ -5,11 +5,13 @@ import { MESSAGE_TEMPLATES } from "@/lib/data";
 import { inboxThreads } from "@/lib/comms";
 import { phoneDisplay, relative } from "@/lib/format";
 import { telnyxStatus } from "@/lib/telnyx";
+import { ensureData } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Inbox · HydroDam Ops" };
 
 export default async function InboxPage() {
+  await ensureData();
   const threads = await inboxThreads();
   const unread = threads.reduce((s, t) => s + t.conversation.unreadCount, 0);
   const outbound30 = threads.filter((t) => t.last?.direction === "outbound").length;

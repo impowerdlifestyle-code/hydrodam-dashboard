@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Icon } from "@/components/Icon";
 import { Avatar, EmptyState, StatusPill } from "@/components/ui";
-import { clientName, getStaff, propertyFor, todaysVisits } from "@/lib/db";
+import { clientName, getStaff, propertyFor, todaysVisits, ensureData } from "@/lib/db";
 import { timeRange } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,8 @@ const KIND_LABEL: Record<string, string> = {
   service: "Service", thirty_day_check: "30-day check",
 };
 
-export default function FieldToday() {
+export default async function FieldToday() {
+  await ensureData();
   const visits = todaysVisits().filter((v) => v.assignedTo.length > 0);
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 

@@ -1,5 +1,7 @@
 import { Avatar, Badge, PageHeader, Panel, ProgressBar, SectionLabel, StatCard, Table, Td, Th } from "@/components/ui";
-import { crewUtilization, db, getStaff } from "@/lib/db";
+import { OpsButton } from "@/components/Ops";
+import { AddTeammateForm } from "@/components/OpsForms";
+import { crewUtilization, db, getStaff, ensureData } from "@/lib/db";
 import { hoursMinutes, money, phoneDisplay, relative } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -7,7 +9,8 @@ export const metadata = { title: "Team · HydroDam Ops" };
 
 const ROLE_TONE = { owner: "ember", office: "teal", crew: "neutral" } as const;
 
-export default function TeamPage() {
+export default async function TeamPage() {
+  await ensureData();
   const d = db();
   const util = crewUtilization();
   const totalMinutes = util.reduce((s, u) => s + u.minutes, 0);
@@ -25,6 +28,11 @@ export default function TeamPage() {
       </div>
 
       <Panel className="mt-6">
+        <SectionLabel>Add someone</SectionLabel>
+        <AddTeammateForm />
+      </Panel>
+
+      <Panel className="mt-6">
         <SectionLabel>Staff</SectionLabel>
         <Table>
           <thead>
@@ -35,6 +43,7 @@ export default function TeamPage() {
               <Th align="right">Cost rate</Th>
               <Th align="right">Hours</Th>
               <Th align="right">Labor cost</Th>
+              <Th align="right"> </Th>
             </tr>
           </thead>
           <tbody>
@@ -58,6 +67,15 @@ export default function TeamPage() {
                   </Td>
                   <Td align="right" className="font-mono text-xs tabular-nums">{u ? hoursMinutes(u.minutes) : "—"}</Td>
                   <Td align="right" className="font-mono text-xs tabular-nums text-ink">{u ? money(u.costCents) : "—"}</Td>
+                  <Td align="right">
+                    <OpsButton
+                      input={{ kind: "team.active", id: s.id, active: !s.active }}
+                      variant="ghost"
+                      confirm={s.active ? "Confirm" : undefined}
+                    >
+                      {s.active ? "Deactivate" : "Reactivate"}
+                    </OpsButton>
+                  </Td>
                 </tr>
               );
             })}

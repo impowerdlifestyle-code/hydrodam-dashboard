@@ -6,6 +6,7 @@ import {
 } from "@/components/ui";
 import {
   DB_LIVE, clientName, db, getStaff, metrics, propertyFor, revenueByMonth, todaysVisits,
+  ensureData,
 } from "@/lib/db";
 import { compactMoney, money, relative, timeRange } from "@/lib/format";
 
@@ -13,7 +14,8 @@ export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Overview · HydroDam Ops" };
 
-export default function OverviewPage() {
+export default async function OverviewPage() {
+  await ensureData();
   const d = db();
   const m = metrics();
   const today = todaysVisits();

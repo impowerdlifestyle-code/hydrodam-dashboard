@@ -147,20 +147,30 @@ export type CrmSnapshot = {
 /**
  * Shared across server instances via the Next data cache, not just the
  * in-process singleton. Without it every cold lambda re-pages the whole CRM and
- * the first visitor on that instance waits ~17s. Supabase removes the need for
- * this entirely; until then, one instance pays the cost and the rest read it.
+ * the first visitor on that instance waits ~17s. One instance pays the cost and
+ * the rest read it.
+ *
+ * A failure THROWS rather than returning null, and that is deliberate: the data
+ * cache stores whatever the function returns, so a returned null would pin an
+ * empty CRM in front of every visitor for the full ten minutes. Errors are not
+ * cached, so a 429 or an expired token costs one slow request, not ten minutes
+ * of a dashboard reporting zero contacts. The caller treats a throw as "leave
+ * the last good snapshot alone".
  */
-export const fetchCrm = unstable_cache(fetchCrmUncached, ["hubspot-crm-snapshot"], {
+const cachedFetch = unstable_cache(fetchCrmUncached, ["hubspot-crm-snapshot"], {
   revalidate: 600,
   tags: ["crm"],
 });
 
-async function fetchCrmUncached(): Promise<CrmSnapshot | null> {
+export async function fetchCrm(): Promise<CrmSnapshot | null> {
   if (!CRM_LIVE) return null;
+  return cachedFetch();
+}
 
+async function fetchCrmUncached(): Promise<CrmSnapshot> {
   // Sequential on purpose — these two share one rate-limit bucket.
   const contacts = await searchAll("contacts", CONTACT_PROPS, 5000);
-  if (!contacts.length) return null;
+  if (!contacts.length) throw new Error("HubSpot returned no contacts — token or rate limit.");
   const deals = await searchAll("deals", DEAL_PROPS, 1000);
 
   const dealByContact = new Map<string, HsRecord>();

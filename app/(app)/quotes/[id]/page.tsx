@@ -3,12 +3,16 @@ import { notFound } from "next/navigation";
 import {
   Badge, KeyValue, LinkButton, Money, PageHeader, Panel, SectionLabel, StatusPill, Table, Td, Th,
 } from "@/components/ui";
-import { clientName, db, getClient, getProperty, getQuote } from "@/lib/db";
+import { OpsButton, OpsGroup } from "@/components/Ops";
+import { ApproveQuoteForm } from "@/components/OpsForms";
+import { clientName, db, getClient, getProperty, getQuote, ensureData } from "@/lib/db";
+import { AGREEMENT_VERSION } from "@/lib/agreement";
 import { dateTime, money, shortDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
 export default async function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
+  await ensureData();
   const { id } = await params;
   const q = getQuote(id);
   if (!q) notFound();
@@ -29,11 +33,24 @@ export default async function QuoteDetail({ params }: { params: Promise<{ id: st
         title={`Quote #${q.number}`}
         subtitle={`${clientName(q.clientId)} · ${prop?.address}, ${prop?.city}`}
         action={
-          <div className="flex flex-wrap gap-2">
-            {q.status === "draft" && <LinkButton href={`/quotes/${q.id}`} icon="send">Send to client</LinkButton>}
+          <OpsGroup>
+            {q.status === "draft" && (
+              <OpsButton input={{ kind: "quote.send", id: q.id }} variant="primary" icon="send">
+                Mark as sent
+              </OpsButton>
+            )}
+            {(q.status === "sent" || q.status === "viewed") && (
+              <OpsButton input={{ kind: "quote.decline", id: q.id }} variant="outline" confirm="Confirm declined">
+                Declined
+              </OpsButton>
+            )}
+            {q.status === "approved" && !job && (
+              <OpsButton input={{ kind: "quote.job", id: q.id }} variant="primary" icon="wrench">
+                Convert to job
+              </OpsButton>
+            )}
             {job && <LinkButton href={`/jobs/${job.id}`} variant="secondary" icon="wrench">Open job #{job.number}</LinkButton>}
-            <LinkButton href={`/p/demo-${q.id}`} variant="outline" icon="external">Client view</LinkButton>
-          </div>
+          </OpsGroup>
         }
       />
 
@@ -144,10 +161,17 @@ export default async function QuoteDetail({ params }: { params: Promise<{ id: st
             </dl>
             {q.approvedByName && (
               <p className="mt-4 rounded-xl border border-good/30 bg-good/10 px-3 py-2 text-xs text-good">
-                Signed by {q.approvedByName}. Agreement version 2026-07-28, IP and user agent recorded.
+                Signed by {q.approvedByName}. Agreement version {AGREEMENT_VERSION}, IP and user agent recorded.
               </p>
             )}
           </Panel>
+
+          {["draft", "sent", "viewed"].includes(q.status) && (
+            <Panel>
+              <SectionLabel>Record the approval</SectionLabel>
+              <ApproveQuoteForm quoteId={q.id} suggested={client?.name ?? ""} />
+            </Panel>
+          )}
 
           <Panel>
             <SectionLabel>Margin at quote</SectionLabel>

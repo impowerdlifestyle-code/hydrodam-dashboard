@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { DemoNotice, EmptyState, PageHeader, Panel, RowLink, StatCard, StatusPill, Table, Td, Th } from "@/components/ui";
-import { clientName, db, jobCosting, propertyFor } from "@/lib/db";
+import { SeedNotice, EmptyState, PageHeader, Panel, RowLink, StatCard, StatusPill, Table, Td, Th } from "@/components/ui";
+import { DB_LIVE, clientName, db, jobCosting, propertyFor, ensureData } from "@/lib/db";
 import { compactMoney, money, shortDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +13,7 @@ const FILTERS = [
 ];
 
 export default async function JobsPage({ searchParams }: { searchParams: Promise<{ f?: string }> }) {
+  await ensureData();
   const { f = "active" } = await searchParams;
   const filter = FILTERS.find((x) => x.key === f) ?? FILTERS[0];
   const d = db();
@@ -27,7 +28,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
 
   return (
     <>
-      <DemoNotice what="Work orders, visits, materials and time entries." />
+      <SeedNotice what="Work orders, visits, materials and time entries." live={DB_LIVE} />
       <PageHeader title="Jobs" subtitle="Work orders from fabrication through installation and sign-off." />
 
       <div className="grid gap-4 sm:grid-cols-3">

@@ -69,3 +69,36 @@ export function patch<T>(
     body: JSON.stringify(values),
   });
 }
+
+export function remove<T>(table: string, query: Record<string, string>): Promise<T[]> {
+  return send<T>(endpoint(table, query), {
+    method: "DELETE",
+    headers: headers({ Prefer: "return=representation" }),
+  });
+}
+
+/**
+ * Calls one of the `api_*` functions from 0002_api.sql.
+ *
+ * These exist because PostgREST issues one statement per request, and several
+ * of this app's writes have to be one transaction or not happen at all — a
+ * quote and its line items, an approval and its signature, a visit and the crew
+ * assignment whose overlap check can reject it. A scalar-returning function
+ * answers with a bare JSON value rather than the array `send` expects, so this
+ * does its own decoding.
+ */
+export async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
+  const url = `${process.env.SUPABASE_URL}/rest/v1/rpc/${fn}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify(args),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Supabase rpc ${fn} ${res.status}: ${detail.slice(0, 300)}`);
+  }
+  const text = await res.text();
+  return (text ? JSON.parse(text) : null) as T;
+}

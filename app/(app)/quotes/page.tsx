@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { EmptyState, PageHeader, Panel, RowLink, StatCard, StatusPill, Table, Td, Th } from "@/components/ui";
-import { clientName, db } from "@/lib/db";
+import { clientName, db, ensureData } from "@/lib/db";
 import { compactMoney, money, relative, shortDate } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +14,7 @@ const FILTERS = [
 ];
 
 export default async function QuotesPage({ searchParams }: { searchParams: Promise<{ f?: string }> }) {
+  await ensureData();
   const { f = "open" } = await searchParams;
   const filter = FILTERS.find((x) => x.key === f) ?? FILTERS[0];
   const d = db();

@@ -3,21 +3,25 @@ import { notFound } from "next/navigation";
 import { Icon } from "@/components/Icon";
 import { Avatar, Badge, ProgressBar, StatusPill } from "@/components/ui";
 import { QA_CHECKLIST, allFields } from "@/lib/forms";
-import { checklistFor, clientName, db, getClient, getJob, getStaff, getVisit, propertyFor } from "@/lib/db";
+import { OpsButton, OpsGroup } from "@/components/Ops";
+import { CrewNotesForm } from "@/components/OpsForms";
+import { checklistFor, clientName, db, getClient, getJob, getStaff, getVisit, propertyFor, ensureData } from "@/lib/db";
 import { phoneDisplay, timeRange } from "@/lib/format";
+import type { VisitStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 // The visit's primary action, as a state machine. One button, one next step.
-const NEXT_ACTION: Record<string, { label: string; tone: string } | undefined> = {
-  scheduled: { label: "I'm on my way", tone: "bg-ember" },
-  confirmed: { label: "I'm on my way", tone: "bg-ember" },
-  en_route: { label: "Arrived on site", tone: "bg-teal" },
-  in_progress: { label: "Complete the checklist", tone: "bg-teal" },
-  completed: undefined,
+// Every target here is a row in 0001's status_transitions table; the database
+// refuses anything else, so this list and that table have to agree.
+const NEXT_ACTION: Partial<Record<VisitStatus, { label: string; to: VisitStatus }>> = {
+  scheduled: { label: "I'm on my way", to: "en_route" },
+  confirmed: { label: "I'm on my way", to: "en_route" },
+  en_route: { label: "Arrived on site", to: "in_progress" },
 };
 
 export default async function FieldVisit({ params }: { params: Promise<{ id: string }> }) {
+  await ensureData();
   const { id } = await params;
   const visit = getVisit(id);
   if (!visit) notFound();
@@ -32,6 +36,7 @@ export default async function FieldVisit({ params }: { params: Promise<{ id: str
   const openings = job ? db().quotes.find((q) => q.id === job.quoteId)?.openings ?? [] : [];
 
   const action = NEXT_ACTION[visit.status];
+  const signedOff = checklist?.status === "submitted";
   const mapsUrl = `https://maps.apple.com/?q=${encodeURIComponent(`${prop?.address}, ${prop?.city}, FL ${prop?.postalCode}`)}`;
 
   return (
@@ -49,10 +54,26 @@ export default async function FieldVisit({ params }: { params: Promise<{ id: str
         <StatusPill status={visit.status} />
       </div>
 
-      {action && (
-        <button className={`mt-5 w-full rounded-xl ${action.tone} py-4 text-base font-semibold text-white transition-opacity hover:opacity-90`}>
-          {action.label}
-        </button>
+      <OpsGroup className="mt-5">
+        {action && (
+          <OpsButton input={{ kind: "visit.status", id: visit.id, status: action.to }} variant="ember" size="lg" full>
+            {action.label}
+          </OpsButton>
+        )}
+        {visit.status === "in_progress" && signedOff && (
+          <OpsButton input={{ kind: "visit.status", id: visit.id, status: "completed" }} variant="primary" size="lg" full>
+            Finish the visit
+          </OpsButton>
+        )}
+      </OpsGroup>
+
+      {visit.status === "in_progress" && !signedOff && (
+        <Link
+          href={`/field/visit/${visit.id}/checklist`}
+          className="mt-5 block w-full rounded-xl bg-teal py-4 text-center text-base font-semibold text-white"
+        >
+          Complete the checklist
+        </Link>
       )}
 
       {/* address + contact */}
@@ -118,6 +139,12 @@ export default async function FieldVisit({ params }: { params: Promise<{ id: str
           {answered === required.length ? "Ready to sign off." : "A job can't be completed until every required check is done."}
         </p>
       </Link>
+
+      {/* notes back to the office */}
+      <div className="panel mt-4 rounded-2xl p-4">
+        <p className="mb-2 font-mono text-[10px] uppercase tracking-widest text-ink-faint">Notes for the office</p>
+        <CrewNotesForm visitId={visit.id} current={visit.crewNotes ?? ""} />
+      </div>
 
       {/* crew */}
       <div className="panel mt-4 rounded-2xl p-4">

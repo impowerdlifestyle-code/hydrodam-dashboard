@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Badge, PageHeader, Panel, RowLink, StatCard, Table, Td, Th } from "@/components/ui";
-import { crmStatus, db, ensureCrm, invoicesFor, jobsFor, liveClients, propertyFor } from "@/lib/db";
+import { crmStatus, db, ensureData, invoicesFor, jobsFor, liveClients, propertyFor } from "@/lib/db";
 import { compactMoney, money, phoneDisplay, relative } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +15,7 @@ export default async function ClientsPage({
 }: {
   searchParams: Promise<{ q?: string; p?: string; addr?: string }>;
 }) {
-  await ensureCrm();
+  await ensureData();
   const { q = "", p = "1", addr } = await searchParams;
   const crm = crmStatus();
 

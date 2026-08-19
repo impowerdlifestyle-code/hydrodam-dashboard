@@ -1,3 +1,7 @@
+import {
+  DEPLOY_KIT_PER_OPENING_CENTS, INSTALL_PER_OPENING_CENTS, PANEL_HEIGHT_IN,
+  POST_COST_EACH_CENTS, SERIES_RATE_PER_SQFT_CENTS, panelCountFor, priceOpening,
+} from "@/lib/pricing";
 import type {
   Automation, Client, Conversation, FormSubmission, Invoice, Job, JobMaterial, LineItem,
   Message, Opening, Payment, Property, Quote, QuoteOpening, ServiceRequest, Snapshot,
@@ -142,26 +146,6 @@ const openings: Opening[] = OPENING_SEEDS.map(([cid, label, type, w, h], i) => (
 
 // ---------------------------------------------------------------- pricing
 
-export const SERIES_RATE_PER_SQFT_CENTS: Record<string, number> = {
-  sentinel: 5800,
-  onyx: 7200,
-  titanium: 9600,
-};
-export const POST_COST_EACH_CENTS = 24000;
-export const INSTALL_PER_OPENING_CENTS = 18500;
-export const DEPLOY_KIT_PER_OPENING_CENTS = 9500;
-export const PANEL_HEIGHT_IN = 7.08;
-
-export function panelCountFor(heightIn: number): number {
-  return Math.max(1, Math.ceil(heightIn / PANEL_HEIGHT_IN));
-}
-
-export function priceOpening(widthIn: number, heightIn: number, series: string, qty: number): number {
-  const sqft = (widthIn * heightIn) / 144;
-  const rate = SERIES_RATE_PER_SQFT_CENTS[series] ?? SERIES_RATE_PER_SQFT_CENTS.sentinel;
-  const posts = widthIn > 108 ? 3 : 2;
-  return Math.round((sqft * rate + posts * POST_COST_EACH_CENTS + DEPLOY_KIT_PER_OPENING_CENTS) * qty);
-}
 
 function buildQuoteOpening(o: Opening, series: Quote["primarySeries"], idx: number): QuoteOpening {
   const posts = o.widthIn > 108 ? 3 : 2;
