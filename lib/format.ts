@@ -86,3 +86,59 @@ export function initials(name: string): string {
 export function titleCase(s: string): string {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
+/* ------------------------------------------------------ calendar days in TZ */
+
+/**
+ * Every date boundary in this app is a boundary in HydroDam's timezone, not in
+ * the server's. That distinction was invisible in development — a Mac set to
+ * America/New_York gives the same answer either way — and wrong in production,
+ * where Vercel runs in UTC. A 9am install rendered at 1pm on the dispatch
+ * board, and an evening visit landed in the wrong day column entirely.
+ *
+ * So: no `getHours`, `getDay` or `toDateString` on a visit time. Compare day
+ * keys, and take the hour from here.
+ */
+
+/** The calendar day in HydroDam's timezone, as YYYY-MM-DD. */
+export function dayKey(value: string | Date = new Date()): string {
+  const d = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) return "";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(d);
+}
+
+export const todayKey = (): string => dayKey(new Date());
+
+/** Hours past midnight in HydroDam's timezone, fractional. */
+export function hoursInTz(iso: string): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: TZ, hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(new Date(iso));
+  const h = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+  const m = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+  return h + m / 60;
+}
+
+/** Day-key arithmetic, anchored at noon UTC so a DST shift cannot skip a day. */
+export function addDaysKey(key: string, days: number): string {
+  const [y, m, d] = key.split("-").map(Number);
+  const at = new Date(Date.UTC(y, m - 1, d, 12));
+  at.setUTCDate(at.getUTCDate() + days);
+  return at.toISOString().slice(0, 10);
+}
+
+/** 0 = Sunday, matching the dispatch board's columns. */
+export function weekdayOfKey(key: string): number {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay();
+}
+
+export const startOfWeekKey = (key: string): string => addDaysKey(key, -weekdayOfKey(key));
+
+/** Formats a day key without ever routing it back through a timezone. */
+export function formatKey(key: string, opts: Intl.DateTimeFormatOptions): string {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString("en-US", { ...opts, timeZone: "UTC" });
+}

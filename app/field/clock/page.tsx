@@ -1,7 +1,7 @@
 import { Avatar, StatusPill } from "@/components/ui";
 import { ClockControl } from "@/components/OpsForms";
 import { clientName, db, getStaff, openTimeEntry, todaysVisits, ensureData } from "@/lib/db";
-import { hoursMinutes, money, timeOfDay } from "@/lib/format";
+import { dayKey, hoursMinutes, money, timeOfDay, todayKey } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +20,9 @@ export default async function ClockPage() {
         {crew.map((s) => {
           const open = openTimeEntry(s.id);
           const todayEntries = d.timeEntries.filter(
-            (t) => t.userId === s.id && new Date(t.startedAt).toDateString() === new Date().toDateString()
+            // "Today" is today in Clearwater; on Vercel the server clock is UTC,
+            // which would roll the crew's day over at 8pm.
+            (t) => t.userId === s.id && dayKey(t.startedAt) === todayKey()
           );
           const minutes = todayEntries.reduce((sum, t) => {
             if (!t.endedAt) return sum + (Date.now() - Date.parse(t.startedAt)) / 60_000;

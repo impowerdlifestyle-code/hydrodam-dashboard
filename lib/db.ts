@@ -1,7 +1,7 @@
 import "server-only";
 import { buildSeed } from "@/lib/seed";
 import { CRM_LIVE, fetchCrm } from "@/lib/hubspot";
-import { phoneDisplay } from "@/lib/format";
+import { dayKey, phoneDisplay, todayKey } from "@/lib/format";
 import { phoneKey, toE164 } from "@/lib/telnyx";
 import * as pg from "@/lib/supabase";
 import { SUPABASE_LIVE } from "@/lib/supabase";
@@ -267,15 +267,23 @@ export function visitsBetween(startISO: string, endISO: string): Visit[] {
     .sort((a, b) => a.scheduledStart.localeCompare(b.scheduledStart));
 }
 
+/**
+ * A day means a day where the customer lives. Comparing instants against a
+ * midnight computed in the server's timezone put every evening visit on the
+ * wrong day once this ran on Vercel, which is UTC.
+ */
+export function visitsOnKey(key: string): Visit[] {
+  return db()
+    .visits.filter((v) => v.scheduledStart && dayKey(v.scheduledStart) === key)
+    .sort((a, b) => a.scheduledStart.localeCompare(b.scheduledStart));
+}
+
 export function visitsOn(date: Date): Visit[] {
-  const start = new Date(date);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start.getTime() + 86_400_000);
-  return visitsBetween(start.toISOString(), end.toISOString());
+  return visitsOnKey(dayKey(date));
 }
 
 export function todaysVisits(): Visit[] {
-  return visitsOn(new Date());
+  return visitsOnKey(todayKey());
 }
 
 export function unscheduledVisits(): Visit[] {

@@ -2,41 +2,35 @@ import Link from "next/link";
 import { Icon } from "@/components/Icon";
 import { Avatar, EmptyState, PageHeader, Panel, SectionLabel, StatusPill } from "@/components/ui";
 import { RescheduleForm } from "@/components/OpsForms";
-import { clientName, db, getStaff, propertyFor, visitsBetween, ensureData } from "@/lib/db";
-import { timeOfDay, timeRange } from "@/lib/format";
+import { clientName, db, getStaff, propertyFor, visitsOnKey, ensureData } from "@/lib/db";
+import {
+  addDaysKey, dayKey, formatKey, hoursInTz, startOfWeekKey, timeOfDay, timeRange, todayKey,
+} from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Schedule · HydroDam Ops" };
 
-const DAY_MS = 86_400_000;
 const KIND_LABEL: Record<string, string> = {
   assessment: "Assessment", measure: "Measure", install: "Install",
   service: "Service", thirty_day_check: "30-day check",
 };
 
-function startOfWeek(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  x.setDate(x.getDate() - x.getDay());
-  return x;
-}
-
 export default async function SchedulePage({ searchParams }: { searchParams: Promise<{ w?: string; view?: string }> }) {
   await ensureData();
   const { w = "0", view = "week" } = await searchParams;
   const weekOffset = Number.parseInt(w, 10) || 0;
-  const weekStart = new Date(startOfWeek(new Date()).getTime() + weekOffset * 7 * DAY_MS);
-  const weekEnd = new Date(weekStart.getTime() + 7 * DAY_MS);
+  // Day keys, not Date objects: the week runs Sunday to Saturday in Clearwater,
+  // whatever timezone the server happens to be in.
+  const weekStart = addDaysKey(startOfWeekKey(todayKey()), weekOffset * 7);
+  const days = Array.from({ length: 7 }, (_, i) => addDaysKey(weekStart, i));
+  const today = todayKey();
 
-  const visits = visitsBetween(weekStart.toISOString(), weekEnd.toISOString());
   const crew = db().staff.filter((s) => s.role === "crew");
+  const visits = days.flatMap((d) => visitsOnKey(d));
   const unassigned = db().visits.filter((v) => v.status === "unscheduled" || v.assignedTo.length === 0);
 
-  const days = Array.from({ length: 7 }, (_, i) => new Date(weekStart.getTime() + i * DAY_MS));
-  const todayKey = new Date().toDateString();
-
   const dayView = view === "day";
-  const dayDate = days.find((d) => d.toDateString() === todayKey) ?? days[1];
+  const dayDate = days.includes(today) ? today : days[1];
 
   return (
     <>
@@ -60,8 +54,8 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
 
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <p className="font-display text-lg font-semibold text-ink">
-          {weekStart.toLocaleDateString("en-US", { month: "long", day: "numeric" })} –{" "}
-          {new Date(weekEnd.getTime() - DAY_MS).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+          {formatKey(weekStart, { month: "long", day: "numeric" })} –{" "}
+          {formatKey(days[6], { month: "long", day: "numeric", year: "numeric" })}
         </p>
         <div className="flex gap-2">
           {(["week", "day"] as const).map((v) => (
@@ -84,12 +78,12 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
         <div className="-mx-5 overflow-x-auto px-5">
           <div className="grid min-w-[900px] grid-cols-7 gap-2">
             {days.map((day) => {
-              const dayVisits = visits.filter((v) => new Date(v.scheduledStart).toDateString() === day.toDateString());
-              const isToday = day.toDateString() === todayKey;
+              const dayVisits = visitsOnKey(day);
+              const isToday = day === today;
               return (
-                <div key={day.toISOString()} className={`rounded-2xl border p-2.5 ${isToday ? "border-line-bright bg-teal/5" : "border-line bg-abyss-2/30"}`}>
+                <div key={day} className={`rounded-2xl border p-2.5 ${isToday ? "border-line-bright bg-teal/5" : "border-line bg-abyss-2/30"}`}>
                   <p className={`mb-2.5 font-mono text-[10px] uppercase tracking-widest ${isToday ? "text-teal" : "text-ink-faint"}`}>
-                    {day.toLocaleDateString("en-US", { weekday: "short" })} {day.getDate()}
+                    {formatKey(day, { weekday: "short" })} {formatKey(day, { day: "numeric" })}
                   </p>
                   <div className="flex min-h-[7rem] flex-col gap-1.5">
                     {dayVisits.length === 0 ? (
@@ -172,11 +166,8 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
   );
 }
 
-function DayBoard({ date, crew }: { date: Date; crew: ReturnType<typeof db>["staff"] }) {
-  const start = new Date(date);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start.getTime() + DAY_MS);
-  const visits = visitsBetween(start.toISOString(), end.toISOString());
+function DayBoard({ date, crew }: { date: string; crew: ReturnType<typeof db>["staff"] }) {
+  const visits = visitsOnKey(date);
 
   const HOUR_START = 7;
   const HOUR_END = 18;
@@ -185,7 +176,7 @@ function DayBoard({ date, crew }: { date: Date; crew: ReturnType<typeof db>["sta
 
   return (
     <Panel className="overflow-hidden">
-      <SectionLabel>{date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</SectionLabel>
+      <SectionLabel>{formatKey(date, { weekday: "long", month: "long", day: "numeric" })}</SectionLabel>
       <div className="-mx-5 overflow-x-auto px-5">
         <div className="min-w-[680px]">
           <div className="flex" style={{ paddingLeft: 52 }}>
@@ -216,10 +207,11 @@ function DayBoard({ date, crew }: { date: Date; crew: ReturnType<typeof db>["sta
                     <div key={h} className="border-b border-line/40" style={{ height: PX_PER_HOUR }} />
                   ))}
                   {mine.map((v) => {
-                    const startD = new Date(v.scheduledStart);
-                    const endD = new Date(v.scheduledEnd);
-                    const top = (startD.getHours() + startD.getMinutes() / 60 - HOUR_START) * PX_PER_HOUR;
-                    const height = Math.max(28, ((endD.getTime() - startD.getTime()) / 3_600_000) * PX_PER_HOUR - 3);
+                    // Position from the hour in Clearwater, not the server's.
+                    const top = (hoursInTz(v.scheduledStart) - HOUR_START) * PX_PER_HOUR;
+                    const durationHours =
+                      (Date.parse(v.scheduledEnd) - Date.parse(v.scheduledStart)) / 3_600_000;
+                    const height = Math.max(28, durationHours * PX_PER_HOUR - 3);
                     return (
                       <Link
                         key={v.id}
