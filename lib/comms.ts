@@ -242,7 +242,13 @@ async function clientByPhone(phone: string): Promise<ClientRow | undefined> {
   return row;
 }
 
-async function conversationForPhone(phone: string): Promise<ConversationRow> {
+/**
+ * `isNew` is how the webhook knows the person texted us first rather than
+ * replying to something we sent: a thread that did not exist until this message
+ * arrived is an inbound opt-in, and the carriers require it to be acknowledged
+ * and recorded as one.
+ */
+async function conversationForPhone(phone: string): Promise<{ conv: ConversationRow; isNew: boolean }> {
   const companyUuid = await company();
   const address = toE164(phone);
 
@@ -252,7 +258,7 @@ async function conversationForPhone(phone: string): Promise<ConversationRow> {
     external_address: `eq.${address}`,
     limit: "1",
   });
-  if (existing) return existing;
+  if (existing) return { conv: existing, isNew: false };
 
   let client = await clientByPhone(address);
   if (!client) {
@@ -274,7 +280,7 @@ async function conversationForPhone(phone: string): Promise<ConversationRow> {
     status: "open",
     unread_count: 0,
   });
-  return created;
+  return { conv: created, isNew: true };
 }
 
 export async function recordInbound(opts: {
@@ -283,14 +289,14 @@ export async function recordInbound(opts: {
   body: string;
   receivedAt?: string;
   providerId?: string;
-}): Promise<{ conversationId: string; clientId: string }> {
+}): Promise<{ conversationId: string; clientId: string; isNewThread: boolean }> {
   if (!SUPABASE_LIVE) {
     const { conversation } = snapshotInbound(opts);
-    return { conversationId: conversation.id, clientId: conversation.clientId };
+    return { conversationId: conversation.id, clientId: conversation.clientId, isNewThread: false };
   }
 
   const companyUuid = await company();
-  const conv = await conversationForPhone(opts.from);
+  const { conv, isNew } = await conversationForPhone(opts.from);
   const createdAt = opts.receivedAt ?? new Date().toISOString();
 
   await pg.insert("messages", {
@@ -315,7 +321,7 @@ export async function recordInbound(opts: {
     status: "open",
   });
 
-  return { conversationId: conv.id, clientId: conv.client_id ?? "" };
+  return { conversationId: conv.id, clientId: conv.client_id ?? "", isNewThread: isNew };
 }
 
 export async function recordOutbound(opts: {

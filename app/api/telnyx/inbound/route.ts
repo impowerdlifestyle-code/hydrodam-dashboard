@@ -41,6 +41,16 @@ const DELIVERY: Record<string, "sent" | "delivered" | "failed"> = {
 const HELP_REPLY =
   "HydroDam flood barriers. Call (727) 613-1415 or reply here and a person will answer. Reply STOP to opt out.";
 
+// Texting us first is a registered opt-in method, so the first message on a new
+// thread gets the carrier-required acknowledgement and a consent record. The
+// wording matches the text-in disclosure published beside the number on
+// thehydrodam.com/contact-us — that page is the CTA the campaign points at.
+const TEXT_IN_REPLY =
+  "Thank you for your message to HydroDam! We will be with you shortly. Msg freq may vary. Std msg & data rates apply. Reply STOP to opt out, HELP for help.";
+
+const TEXT_IN_CONSENT =
+  "Texted in to (727) 351-8152, the number published at thehydrodam.com/contact-us with the disclosure: By texting us you agree to receive SMS text messages from HydroDam about your estimate, appointments and service, and occasional marketing or promotional messages. Consent is not a condition of purchase. Message frequency may vary. Standard message and data rates may apply. Reply STOP to opt out, HELP for help.";
+
 export async function POST(req: Request) {
   const raw = await req.text();
 
@@ -64,7 +74,7 @@ export async function POST(req: Request) {
     const body = p.text ?? "";
     if (!from) return NextResponse.json({ ok: true });
 
-    const { conversationId, clientId } = await recordInbound({
+    const { conversationId, clientId, isNewThread } = await recordInbound({
       from,
       to: p.to?.[0]?.phone_number ?? process.env.TELNYX_FROM ?? "",
       body,
@@ -85,6 +95,10 @@ export async function POST(req: Request) {
       });
     }
     if (keyword === "help") await sendSms(from, HELP_REPLY);
+    else if (isNewThread && keyword !== "stop") {
+      await recordKeywordConsent({ phone: from, clientId, granted: true, wording: TEXT_IN_CONSENT });
+      await sendSms(from, TEXT_IN_REPLY);
+    }
 
     revalidatePath("/inbox");
     revalidatePath(`/inbox/${conversationId}`);
