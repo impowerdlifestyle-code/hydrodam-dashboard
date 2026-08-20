@@ -492,11 +492,18 @@ async function pickChannel(cfg: ConfigRow, cand: Candidate): Promise<Channel> {
     // wireless number is carrier-filtered. Recording that as a suppression is
     // honest; pretending it sent is not.
     if (process.env.SMS_CARRIER_READY !== "1") return { ok: false, reason: "no_10dlc_registration" };
-    const marketing = cfg.requires_consent === "sms_marketing";
-    if (marketing && !(await hasConsent(cand.client.id, "sms_marketing"))) {
+    // Consent has to be POSITIVE, not merely un-revoked. The website's SMS box
+    // is unchecked and optional, so someone who submits the form without
+    // ticking it now has no consent row at all — and "no row" used to read as
+    // "never opted out", which would have texted exactly the people who
+    // declined. Absence of a yes is a no.
+    if (await optedOut(cand.client.id)) return { ok: false, reason: "opted_out" };
+    if (!(await hasConsent(cand.client.id, "sms_transactional"))) {
       return { ok: false, reason: "no_consent" };
     }
-    if (await optedOut(cand.client.id)) return { ok: false, reason: "opted_out" };
+    if (cfg.requires_consent === "sms_marketing" && !(await hasConsent(cand.client.id, "sms_marketing"))) {
+      return { ok: false, reason: "no_consent" };
+    }
     return { ok: true, channel: "sms", address: toE164(cand.client.phone) };
   }
 
@@ -510,7 +517,10 @@ async function hasConsent(clientId: string, channel: string): Promise<boolean> {
   return Boolean(row?.granted);
 }
 
-/** STOP revokes transactional too, and that is a hard block on every send. */
+/**
+ * An explicit STOP, as opposed to never having said yes. Both block the send;
+ * they are kept apart so the suppression reason tells you which one happened.
+ */
 async function optedOut(clientId: string): Promise<boolean> {
   const [row] = await pg.select<{ granted: boolean }>("v_current_consent", {
     select: "granted", client_id: `eq.${clientId}`, channel: "eq.sms_transactional", limit: "1",

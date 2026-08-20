@@ -100,17 +100,24 @@ export async function POST(req: Request) {
       await addOpenings(company, propertyId, body.openings);
     }
 
+    // The tick grants BOTH channels, because the label the person read covers
+    // both: appointment and service updates as well as marketing. Writing only
+    // sms_marketing left every website opt-in with no transactional consent,
+    // which is the channel the send gate and the Inbox actually read.
     if (body.smsConsent && phone && body.consentWording) {
-      await pg.insert("consents", {
-        company_id: company,
-        client_id: clientId,
-        phone,
-        channel: "sms_marketing",
-        action: "granted",
-        wording: body.consentWording,
-        source,
-        source_url: body.sourceUrl ?? null,
-      });
+      await pg.insert(
+        "consents",
+        (["sms_transactional", "sms_marketing"] as const).map((channel) => ({
+          company_id: company,
+          client_id: clientId,
+          phone,
+          channel,
+          action: "granted",
+          wording: body.consentWording,
+          source,
+          source_url: body.sourceUrl ?? null,
+        }))
+      );
     }
 
     const number = await pg.rpc<number>("next_doc_number", { p_company: company, p_type: "request" });
