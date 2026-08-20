@@ -100,7 +100,11 @@ const toMessage = (r: MessageRow): Message => ({
   deliveryError: r.error_message ?? undefined,
 });
 
-const toClient = (r: ClientRow, consent: { granted: boolean; occurredAt: string } | undefined): Client => ({
+const toClient = (
+  r: ClientRow,
+  consent: { granted: boolean; occurredAt: string } | undefined,
+  marketing?: { granted: boolean }
+): Client => ({
   id: r.id,
   name: r.display_name,
   email: r.email ?? undefined,
@@ -108,6 +112,7 @@ const toClient = (r: ClientRow, consent: { granted: boolean; occurredAt: string 
   type: r.type,
   leadSource: r.lead_source,
   smsConsent: consent?.granted ?? false,
+  smsMarketingConsent: marketing?.granted ?? false,
   smsOptOutAt: consent && !consent.granted ? consent.occurredAt : undefined,
   tags: r.tags,
   createdAt: r.created_at,
@@ -177,13 +182,20 @@ export async function clientOn(conversation: Conversation): Promise<Client | und
   });
   if (!row) return undefined;
 
-  const [consent] = await pg.select<{ granted: boolean; occurred_at: string }>("v_current_consent", {
-    select: "granted,occurred_at",
+  // Both channels in one read. Fetching only sms_transactional and calling it
+  // "consent" is what let the UI badge a transactional yes as marketing.
+  const rows = await pg.select<{ granted: boolean; occurred_at: string; channel: string }>("v_current_consent", {
+    select: "granted,occurred_at,channel",
     client_id: `eq.${row.id}`,
-    channel: "eq.sms_transactional",
-    limit: "1",
+    channel: "in.(sms_transactional,sms_marketing)",
   });
-  return toClient(row, consent ? { granted: consent.granted, occurredAt: consent.occurred_at } : undefined);
+  const consent = rows.find((c) => c.channel === "sms_transactional");
+  const marketing = rows.find((c) => c.channel === "sms_marketing");
+  return toClient(
+    row,
+    consent ? { granted: consent.granted, occurredAt: consent.occurred_at } : undefined,
+    marketing ? { granted: marketing.granted } : undefined
+  );
 }
 
 export type Thread = { conversation: Conversation; name: string; last?: Message };

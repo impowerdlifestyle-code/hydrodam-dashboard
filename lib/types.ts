@@ -33,7 +33,14 @@ export type Client = {
   phone?: string;
   type: "residential" | "commercial" | "hoa" | "property_manager";
   leadSource: string;
+  /** Transactional SMS consent — the channel every send is gated on. */
   smsConsent: boolean;
+  /**
+   * Marketing SMS consent, a separate row on a separate channel. Kept apart
+   * from `smsConsent` because a transactional yes is not permission to market:
+   * reading one for the other is how a compliant ledger starts lying.
+   */
+  smsMarketingConsent?: boolean;
   smsConsentWording?: string;
   /** Set when they text STOP. A hard block on every send, transactional included. */
   smsOptOutAt?: string;

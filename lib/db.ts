@@ -1185,7 +1185,7 @@ export function smsGate(client: Client | undefined, kind: "reply" | "marketing")
   if (client.demo) return { ok: false, reason: "This is a seeded demo client. Sending would text a made-up number." };
   if (!client.phone) return { ok: false, reason: "No mobile number on this client." };
   if (client.smsOptOutAt) return { ok: false, reason: "This client texted STOP. Only they can restart the thread." };
-  if (kind === "marketing" && !client.smsConsent) {
+  if (kind === "marketing" && !client.smsMarketingConsent) {
     return { ok: false, reason: "No marketing consent on file. Transactional replies still send." };
   }
   return { ok: true };

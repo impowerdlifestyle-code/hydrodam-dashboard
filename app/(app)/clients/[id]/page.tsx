@@ -221,7 +221,11 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
           <Panel>
             <SectionLabel>Consent</SectionLabel>
             <Badge tone={client.smsConsent ? "good" : "bad"}>
-              {client.smsConsent ? "SMS marketing consented" : "No SMS consent on file"}
+              {client.smsConsent
+                ? client.smsMarketingConsent
+                  ? "SMS consented, marketing included"
+                  : "SMS consented, transactional only"
+                : "No SMS consent on file"}
             </Badge>
             {client.smsConsentWording ? (
               <p className="mt-3 rounded-xl border border-line bg-abyss-2/60 p-3 text-xs leading-relaxed text-ink-dim">
