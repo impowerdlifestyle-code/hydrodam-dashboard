@@ -1,6 +1,7 @@
 import "server-only";
 import * as pg from "@/lib/supabase";
 import { SUPABASE_LIVE } from "@/lib/supabase";
+import { toE164 } from "@/lib/telnyx";
 import type {
   Automation, Client, Conversation, FormSubmission, Invoice, Job, JobMaterial, LineItem,
   Message, Opening, Payment, Property, Quote, QuoteOpening, ServiceRequest, Snapshot,
@@ -595,6 +596,28 @@ export function promotedHubspotIds(snap: Snapshot): Set<string> {
  * assessment, writes a quote, opens a job. Idempotent on the HubSpot id, so a
  * double-click cannot fork someone into two clients.
  */
+/**
+ * HubSpot's contact fields are free text; clients.phone is not.
+ *
+ * `clients_phone_e164` requires a leading +, and the CRM hands back
+ * "17274920033", "(727) 492-0033" and "" in roughly equal measure — each of
+ * which reached Postgres as-is and came back a raw 23514 check violation that
+ * stopped a portal link, a quote or a saved address from ever being created.
+ * A number that cannot be made E.164 is dropped rather than argued with; the
+ * caller checks that something reachable survived, because `clients_reachable`
+ * is the next constraint waiting.
+ */
+const E164 = /^\+[1-9]\d{7,14}$/;
+
+function reachable(lead: Client): { email: string | null; phone: string | null } {
+  const raw = lead.phone?.trim();
+  const candidate = raw ? toE164(raw) : "";
+  return {
+    email: lead.email?.trim() || null,
+    phone: E164.test(candidate) ? candidate : null,
+  };
+}
+
 export async function promoteClient(lead: Client, property?: Property): Promise<{ clientId: string; propertyId?: string }> {
   const company = await companyId();
 
@@ -611,14 +634,21 @@ export async function promoteClient(lead: Client, property?: Property): Promise<
   const parts = lead.name.trim().split(/\s+/);
   const isPerson = lead.type === "residential" && parts.length > 1;
 
+  const { email, phone } = reachable(lead);
+  if (!email && !phone) {
+    throw new Error(
+      "HubSpot has no usable email or phone for this contact, and a client record has to have one of the two."
+    );
+  }
+
   const [created] = await pg.insert<{ id: string }>("clients", {
     company_id: company,
     type: lead.type,
     first_name: isPerson ? parts.slice(0, -1).join(" ") : lead.name,
     last_name: isPerson ? parts.at(-1) : null,
     company_name: lead.type === "residential" ? null : lead.name,
-    email: lead.email ?? null,
-    phone: lead.phone ?? null,
+    email,
+    phone,
     lead_source: lead.leadSource,
     tags: lead.tags ?? [],
     hubspot_contact_id: lead.hubspotContactId ?? null,
