@@ -167,16 +167,25 @@ const toStaff = (r: UserRow): Staff => ({
   active: r.is_active,
 });
 
-const toClient = (r: ClientRow, consent?: { granted: boolean; wording?: string; at: string }): Client => ({
+type ClientConsent = {
+  transactional?: { granted: boolean; wording?: string; at: string };
+  marketing?: { granted: boolean; wording?: string; at: string };
+};
+
+const toClient = (r: ClientRow, consent?: ClientConsent): Client => ({
   id: r.id,
   name: r.display_name,
   email: r.email ?? undefined,
   phone: r.phone ?? undefined,
   type: r.type,
   leadSource: r.lead_source,
-  smsConsent: consent?.granted ?? false,
-  smsConsentWording: consent?.granted ? consent.wording : undefined,
-  smsOptOutAt: consent && !consent.granted ? consent.at : undefined,
+  smsConsent: consent?.transactional?.granted ?? false,
+  smsMarketingConsent: consent?.marketing?.granted ?? false,
+  smsConsentWording:
+    (consent?.transactional?.granted ? consent.transactional.wording : undefined) ??
+    (consent?.marketing?.granted ? consent.marketing.wording : undefined),
+  smsOptOutAt:
+    consent?.transactional && !consent.transactional.granted ? consent.transactional.at : undefined,
   tags: r.tags ?? [],
   createdAt: r.created_at,
   hubspotContactId: r.hubspot_contact_id ?? undefined,
@@ -507,7 +516,10 @@ export async function loadSnapshot(): Promise<Snapshot> {
   ] = await Promise.all([
     pg.select<UserRow>("users", { select: COLS.users, order: "role.asc,full_name.asc" }),
     pg.select<ClientRow>("clients", { select: COLS.clients, archived_at: "is.null", order: "created_at.desc", limit: "1000" }),
-    pg.select<ConsentRow>("v_current_consent", { select: "client_id,channel,granted,wording,occurred_at", channel: "eq.sms_marketing" }),
+    pg.select<ConsentRow>("v_current_consent", {
+      select: "client_id,channel,granted,wording,occurred_at",
+      channel: "in.(sms_transactional,sms_marketing)",
+    }),
     pg.select<PropertyRow>("properties", { select: COLS.properties, limit: "1000" }),
     pg.select<OpeningRow>("openings", { select: COLS.openings, order: "sort_order.asc", limit: "1000" }),
     pg.select<RequestRow>("requests", { select: COLS.requests, order: "created_at.desc", limit: "1000" }),
@@ -527,9 +539,18 @@ export async function loadSnapshot(): Promise<Snapshot> {
     }),
   ]);
 
-  const consentFor = new Map<string, { granted: boolean; wording?: string; at: string }>();
+  // Both channels, kept apart. Reading the marketing row as `smsConsent` is
+  // what let the client page badge a marketing yes as transactional, and left
+  // `smsMarketingConsent` permanently false so smsGate() refused every
+  // marketing send to someone who had actually ticked the box.
+  const consentFor = new Map<string, ClientConsent>();
   for (const c of consents) {
-    if (c.client_id) consentFor.set(c.client_id, { granted: c.granted, wording: c.wording ?? undefined, at: c.occurred_at });
+    if (!c.client_id) continue;
+    const entry = consentFor.get(c.client_id) ?? {};
+    const value = { granted: c.granted, wording: c.wording ?? undefined, at: c.occurred_at };
+    if (c.channel === "sms_transactional") entry.transactional = value;
+    else if (c.channel === "sms_marketing") entry.marketing = value;
+    consentFor.set(c.client_id, entry);
   }
 
   const sentPerAutomation = new Map<string, number>();
