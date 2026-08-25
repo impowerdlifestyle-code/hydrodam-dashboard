@@ -68,8 +68,12 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
             <p className="mb-3 text-xs leading-relaxed text-ink-dim">
               An account-free link to their own project. The link is the credential, so it is shown
               once and stored only as a hash — mint a new one rather than hunting for the old.
+              To check what they are looking at, use the preview rather than opening a live link.
             </p>
             <OpsGroup>
+              <LinkButton href={`/clients/${client.id}/portal`} variant="secondary" icon="eye">
+                View their portal
+              </LinkButton>
               <OpsButton input={{ kind: "portal.link", clientId: client.id }} variant="primary" icon="link">
                 Create a link
               </OpsButton>

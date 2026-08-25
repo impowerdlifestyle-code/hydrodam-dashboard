@@ -50,6 +50,9 @@ export default async function QuoteDetail({ params }: { params: Promise<{ id: st
               </OpsButton>
             )}
             {job && <LinkButton href={`/jobs/${job.id}`} variant="secondary" icon="wrench">Open job #{job.number}</LinkButton>}
+            <LinkButton href={`/clients/${q.clientId}/portal`} variant="outline" icon="eye">
+              View their portal
+            </LinkButton>
             <OpsButton input={{ kind: "portal.link", clientId: q.clientId, quoteId: q.id }} variant="outline" icon="link">
               Client link
             </OpsButton>
