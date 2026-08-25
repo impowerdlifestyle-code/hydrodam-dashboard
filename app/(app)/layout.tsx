@@ -1,8 +1,13 @@
 import type { ReactNode } from "react";
 import { Sidebar } from "@/components/Sidebar";
-import { db, metrics } from "@/lib/db";
+import { db, ensureData, metrics } from "@/lib/db";
 
-export default function AppLayout({ children }: { children: ReactNode }) {
+// The layout renders alongside the page, not after it, so it cannot rely on
+// the page's own ensureData() having landed. Without this await a cold lambda
+// painted the sidebar counts straight off lib/seed.ts — seeded jobs, invoices
+// and unread threads, in production, on the first request after every deploy.
+export default async function AppLayout({ children }: { children: ReactNode }) {
+  await ensureData();
   const m = metrics();
   const badges: Record<string, number> = {
     "/requests": m.unassignedRequests,
