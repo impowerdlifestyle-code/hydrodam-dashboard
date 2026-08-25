@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Badge, KeyValue, PageHeader, Panel, SectionLabel, StatusPill } from "@/components/ui";
 import { OpsSelect } from "@/components/Ops";
 import { PropertyForm, QuoteFromRequestForm, ScheduleVisitForm } from "@/components/OpsForms";
-import { db, ensureData, getClient, getRequest, openingsFor, propertyFor, quoteFor, staffName } from "@/lib/db";
+import { db, ensureData, getClient, getRequest, openingsFor, propertyFor, quoteFor, requestRef, staffName } from "@/lib/db";
 import { dateTime, money, phoneDisplay, relative } from "@/lib/format";
 import type { RequestStatus } from "@/lib/types";
 
@@ -45,7 +45,7 @@ export default async function RequestDetail({ params }: { params: Promise<{ id: 
 
       <PageHeader
         title={r.title}
-        subtitle={`Request #${r.number} · ${r.source} · ${relative(r.createdAt)}`}
+        subtitle={`${requestRef(r)} · ${r.source} · ${relative(r.createdAt)}`}
       />
 
       <div className="grid gap-6 lg:grid-cols-3">

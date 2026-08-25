@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { EmptyState, PageHeader, Panel, RowLink, StatCard, StatusPill, Table, Td, Th } from "@/components/ui";
-import { clientName, crmStatus, db, ensureData, liveRequests, propertyFor, staffName } from "@/lib/db";
+import { clientName, crmStatus, db, ensureData, liveRequests, propertyFor, requestRef, staffName } from "@/lib/db";
 import { money, relative } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -125,7 +125,7 @@ export default async function RequestsPage({
                   <tr key={r.id} className="text-ink-dim transition-colors hover:bg-white/[0.03]">
                     <Td>
                       <RowLink href={`/requests/${r.id}`}>
-                        <span className="font-mono text-[11px] text-ink-faint">#{r.number}</span>
+                        <span className="font-mono text-[11px] text-ink-faint">{requestRef(r, "short")}</span>
                         <span className="mt-0.5 block truncate text-sm font-semibold">{r.title}</span>
                       </RowLink>
                     </Td>

@@ -205,6 +205,20 @@ export const getRequest = (id: string): ServiceRequest | undefined =>
 export const getStaff = (id: string): Staff | undefined => db().staff.find((s) => s.id === id);
 export const getConversation = (id: string): Conversation | undefined => db().conversations.find((c) => c.id === id);
 
+/**
+ * How a request is referred to on screen.
+ *
+ * Only rows in the ledger own a number — it comes from `document_counters` and
+ * a person can quote it back to you. A HubSpot lead is numbered in-process
+ * from 1000 purely to fill the field, so it both collides with the real
+ * sequence (request #1000 was two different people) and shifts whenever the
+ * CRM sweep returns contacts in a different order. Never show it as an id.
+ */
+export const requestRef = (r: ServiceRequest, style: "full" | "short" = "full"): string => {
+  if (r.id.startsWith("hsr_")) return style === "full" ? "HubSpot lead" : "lead";
+  return style === "full" ? `Request #${r.number}` : `#${r.number}`;
+};
+
 export const clientName = (id: string): string => getClient(id)?.name ?? "Unknown client";
 export const staffName = (id: string): string => getStaff(id)?.name ?? "Unassigned";
 
