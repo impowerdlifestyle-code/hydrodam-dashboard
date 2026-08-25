@@ -14,7 +14,10 @@ import type { Client, Property, ServiceRequest, RequestStatus } from "@/lib/type
  */
 
 const BASE = "https://api.hubapi.com";
-const token = () => process.env.HUBSPOT_TOKEN;
+// The production value was stored with a trailing newline (piped into
+// `vercel env add`), which survives into the Authorization header. fetch
+// currently tolerates it; a stricter runtime would reject the header outright.
+const token = () => process.env.HUBSPOT_TOKEN?.trim();
 
 export const CRM_LIVE = Boolean(process.env.HUBSPOT_TOKEN);
 
