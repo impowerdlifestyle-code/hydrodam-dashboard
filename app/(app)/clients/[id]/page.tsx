@@ -4,6 +4,7 @@ import {
   Badge, KeyValue, LinkButton, Money, PageHeader, Panel, SectionLabel, StatusPill, Table, Td, Th,
 } from "@/components/ui";
 import { JOURNEY } from "@/lib/data";
+import { journeyFor } from "@/lib/journey";
 import { Stepper } from "@/components/ui";
 import { OpsButton, OpsGroup } from "@/components/Ops";
 import { OpeningForm, PropertyForm } from "@/components/OpsForms";
@@ -29,15 +30,9 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
   const lifetime = jobs.reduce((s, j) => s + j.contractCents, 0);
   const openBalance = invoices.reduce((s, i) => s + (i.totalCents - i.amountPaidCents), 0);
 
-  // Where they sit in the customer-facing journey.
-  const latestJob = jobs[jobs.length - 1];
-  const latestQuote = quotes[quotes.length - 1];
-  let step = 0;
-  if (latestQuote) step = 2;
-  if (latestQuote?.status === "approved") step = 3;
-  if (latestQuote?.status === "converted") step = 4;
-  if (latestJob?.status === "scheduled") step = 5;
-  if (latestJob && ["completed", "invoiced", "closed"].includes(latestJob.status)) step = 6;
+  // Where they sit in the customer-facing journey — ours if we have a quote or
+  // job for them, HubSpot's lead status and deal stage if we do not.
+  const journey = journeyFor(client);
 
   return (
     <>
@@ -58,7 +53,22 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
 
       <Panel className="mb-6">
         <SectionLabel>Where they are</SectionLabel>
-        <Stepper steps={[...JOURNEY]} current={step} />
+        {journey.applicable ? (
+          <>
+            <Stepper steps={[...JOURNEY]} current={journey.current} />
+            {journey.caption && (
+              <p className="mt-3 text-xs text-ink-faint">
+                {journey.caption}
+                {journey.source === "crm" && " · from HubSpot"}
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-ink-dim">
+            Not on the journey — HubSpot has this contact as{" "}
+            <span className="text-ink">{journey.caption ?? "unqualified"}</span>.
+          </p>
+        )}
       </Panel>
 
       <div className="grid gap-6 lg:grid-cols-3">

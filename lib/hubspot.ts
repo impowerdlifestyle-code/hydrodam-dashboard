@@ -112,13 +112,41 @@ async function dealContactIds(dealIds: string[]): Promise<Map<string, string>> {
 // lifecyclestage is 98% "lead" and the custom pipeline fields were never filled in.
 const LEAD_STATUS: Record<string, RequestStatus> = {
   NEW: "new",
+  OPEN: "new",
   OPEN_DEAL: "assessment_scheduled",
   ATTEMPTED_TO_CONTACT: "contacted",
+  CONNECTED: "contacted",
+  IN_PROGRESS: "contacted",
   "Future Follow Up": "contacted",
   "Itimized Estimate Pending": "assessed",
+  // Mady's own spelling, live in the portal. Do not "correct" it.
+  "Awiting Customer Measurements": "assessed",
+  BAD_TIMING: "unqualified",
+  "Declined Itimized Estimate": "unqualified",
   UNQUALIFIED: "unqualified",
   "Inadequate Contact Info": "unqualified",
 };
+
+/**
+ * A status this map has never seen used to fall through to "new", which put 95
+ * contacts on the Requests board as fresh unworked leads — including seven who
+ * had declined an itemised estimate and eleven marked bad timing. The fallback
+ * is unchanged, because a request has to have some status, but an unknown value
+ * is now said out loud once per snapshot so the next label Mady invents shows up
+ * in the logs instead of quietly becoming a new lead.
+ */
+const unknownStatuses = new Set<string>();
+
+function requestStatusFor(raw: string | null): RequestStatus {
+  const key = raw ?? "";
+  const mapped = LEAD_STATUS[key];
+  if (mapped) return mapped;
+  if (key && !unknownStatuses.has(key)) {
+    unknownStatuses.add(key);
+    console.warn(`[hubspot] unmapped hs_lead_status ${JSON.stringify(key)} — treating as "new". Add it to LEAD_STATUS.`);
+  }
+  return "new";
+}
 
 const SOURCE_LABEL: Record<string, string> = {
   NEW: "Website",
@@ -224,7 +252,7 @@ async function fetchCrmUncached(): Promise<CrmSnapshot> {
     const p = c.properties;
     const id = `hs_${c.id}`;
     const createdAt = p.createdate ?? new Date().toISOString();
-    const status = LEAD_STATUS[p.hs_lead_status ?? ""] ?? "new";
+    const status = requestStatusFor(p.hs_lead_status);
     const dealForContact = dealByContact.get(c.id);
 
     clients.push({
@@ -241,6 +269,10 @@ async function fetchCrmUncached(): Promise<CrmSnapshot> {
       tags: p.hs_lead_status ? [p.hs_lead_status] : [],
       createdAt,
       hubspotContactId: c.id,
+      crmStatus: status,
+      crmStatusLabel: p.hs_lead_status ?? undefined,
+      hubspotDealId: dealForContact?.id,
+      hubspotDealStage: dealForContact?.properties.dealstage ?? undefined,
       paid: paidFrom(p, dealForContact),
     });
 
@@ -288,4 +320,67 @@ async function fetchCrmUncached(): Promise<CrmSnapshot> {
     addressedCount: properties.length,
     paidCount: clients.filter((c) => c.paid).length,
   };
+}
+
+/**
+ * The write side. Everything above this reads; these three mutate a CRM that
+ * belongs to the client, so they are deliberately few and deliberately narrow.
+ */
+async function hsRequest<T>(path: string, method: string, body: unknown): Promise<T | null> {
+  const t = token();
+  if (!t) return null;
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${t}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) {
+    console.warn(`[hubspot] ${method} ${path} -> ${res.status} ${(await res.text()).slice(0, 200)}`);
+    return null;
+  }
+  return (await res.json()) as T;
+}
+
+export async function hsPatch<T>(path: string, body: unknown): Promise<T | null> {
+  return hsRequest<T>(path, "PATCH", body);
+}
+
+/** The single deal associated with a contact, with the stage it is sitting in. */
+export async function dealIdForContact(
+  contactId: string,
+): Promise<{ id: string; stage: string } | null> {
+  const assoc = await hsRequest<{ results?: { toObjectId?: number; id?: string }[] }>(
+    `/crm/v4/objects/contacts/${contactId}/associations/deals`,
+    "GET",
+    undefined,
+  );
+  const first = assoc?.results?.[0];
+  const dealId = first ? String(first.toObjectId ?? first.id ?? "") : "";
+  if (!dealId) return null;
+
+  const deal = await hsRequest<{ properties?: Record<string, string> }>(
+    `/crm/v3/objects/deals/${dealId}?properties=dealstage`,
+    "GET",
+    undefined,
+  );
+  return { id: dealId, stage: deal?.properties?.dealstage ?? "" };
+}
+
+/**
+ * A timeline note on the contact. HubSpot strips HTML comments from note
+ * bodies, so this is plain text a person reads — the same constraint the
+ * marketing site's ops layer ran into.
+ */
+export async function hsNote(contactId: string, body: string): Promise<void> {
+  const created = await hsRequest<{ id?: string }>("/crm/v3/objects/notes", "POST", {
+    properties: { hs_note_body: body, hs_timestamp: new Date().toISOString() },
+  });
+  if (!created?.id) return;
+  await hsRequest(
+    `/crm/v4/objects/notes/${created.id}/associations/default/contacts/${contactId}`,
+    "PUT",
+    undefined,
+  );
 }

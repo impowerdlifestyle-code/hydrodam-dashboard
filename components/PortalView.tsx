@@ -5,6 +5,7 @@ import { JOURNEY } from "@/lib/data";
 import {
   getClient, invoicesFor, isApprovable, jobsFor, nextVisitFor, portalQuote, propertyFor,
 } from "@/lib/db";
+import { journeyFor } from "@/lib/journey";
 import { longDate, money, shortDate, timeRange } from "@/lib/format";
 
 /**
@@ -35,12 +36,9 @@ export function PortalView({
   const nextVisit = job ? nextVisitFor(job.id) : undefined;
   const balance = invoices.reduce((s, i) => s + (i.totalCents - i.amountPaidCents), 0);
 
-  let step = 0;
-  if (quote) step = 2;
-  if (quote?.status === "approved") step = 3;
-  if (quote?.status === "converted") step = 4;
-  if (job?.status === "scheduled") step = 5;
-  if (job && ["completed", "invoiced", "closed"].includes(job.status)) step = 6;
+  // The same rule the office sees. The customer gets no caption: "Contacted —
+  // ATTEMPTED_TO_CONTACT" is an internal note, not something to show them.
+  const step = journeyFor(client).current;
 
   return (
     <div className="mx-auto max-w-2xl px-5 py-10">

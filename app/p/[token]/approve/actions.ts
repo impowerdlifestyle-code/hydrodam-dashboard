@@ -3,7 +3,8 @@
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { AGREEMENT_VERSION, ESIGN_CONSENT } from "@/lib/agreement";
-import { DB_LIVE, ensureData, getQuote, invalidate, isApprovable } from "@/lib/db";
+import { DB_LIVE, ensureData, getClient, getQuote, invalidate, isApprovable } from "@/lib/db";
+import { syncTransition } from "@/lib/crm-sync";
 import { resolvePortalToken } from "@/lib/portal";
 import * as pg from "@/lib/supabase";
 
@@ -67,6 +68,13 @@ export async function approveFromPortal(
     p_esign_consent: ESIGN_CONSENT,
   });
   invalidate();
+
+  // The customer signing is exactly the moment Mady's pipeline should move, and
+  // it is the one status change no one in the office is present for.
+  await syncTransition(
+    { entity: "quote", from: quote.status, to: "approved" },
+    getClient(link.clientId)?.hubspotContactId,
+  );
 
   revalidatePath(`/p/${token}`);
   revalidatePath("/quotes", "layout");

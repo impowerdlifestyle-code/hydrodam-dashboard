@@ -7,12 +7,13 @@ import {
   DB_LIVE, addTeammate, approveQuote, clockIn, clockOut, convertQuoteToJob, createInvoice,
   addOpening, createQuote, createVisit, ensureData, getJob, getQuote, getRequest, getVisit,
   moveVisit, openingsFor, realClientId, realRequestId, recordPayment, removeOpening, saveChecklist,
-  saveProperty,
+  saveProperty, getClient,
   setTeammateActive, toggleAutomation, updateInvoice, updateJob, updateQuote, updateRequest,
   updateVisit,
 } from "@/lib/db";
 import { specFor } from "@/lib/pricing";
 import { mintPortalLink, revokePortalLinks } from "@/lib/portal";
+import { syncTransition } from "@/lib/crm-sync";
 import { requireSession } from "@/lib/session";
 import type {
   InvoiceKind, JobStatus, OpeningType, PaymentMethod, RequestStatus, Role, Series, VisitKind,
@@ -123,6 +124,26 @@ function humanise(err: unknown): string {
   return message;
 }
 
+/**
+ * Mirror a quote's move into HubSpot's deal pipeline.
+ *
+ * Read after the write, not before: the database is what decides whether the
+ * move was legal, so syncing off the intended status would push a stage change
+ * for a transition Postgres refused.
+ */
+async function pushQuoteStage(
+  quoteId: string,
+  from: string | undefined,
+  to: string,
+  note?: string,
+): Promise<void> {
+  if (!from || from === to) return;
+  const quote = getQuote(quoteId);
+  if (quote?.status !== to) return;
+  const contactId = getClient(quote.clientId)?.hubspotContactId;
+  await syncTransition({ entity: "quote", from, to }, contactId, { note });
+}
+
 function revalidateEverything(): void {
   for (const path of ["/", "/requests", "/quotes", "/jobs", "/schedule", "/invoices", "/clients", "/team", "/automations", "/reports", "/field"]) {
     revalidatePath(path, "layout");
@@ -193,25 +214,35 @@ async function dispatch(input: OpsInput): Promise<OpsResult> {
 
     // -------------------------------------------------------------- quotes
 
-    case "quote.send":
+    case "quote.send": {
+      const before = getQuote(input.id)?.status;
       await updateQuote(input.id, { status: "sent" });
+      await pushQuoteStage(input.id, before, "sent");
       return { ok: true, message: "Marked as sent." };
+    }
 
-    case "quote.decline":
+    case "quote.decline": {
+      const before = getQuote(input.id)?.status;
       await updateQuote(input.id, { status: "declined" });
+      await pushQuoteStage(input.id, before, "declined");
       return { ok: true, message: "Marked declined." };
+    }
 
     case "quote.approve": {
       const name = input.signerName.trim();
       if (name.length < 2) return { ok: false, message: "Who approved it? A signer name is required." };
+      const before = getQuote(input.id)?.status;
       await approveQuote(input.id, name, "", "HydroDam Ops (office)", AGREEMENT_VERSION, ESIGN_CONSENT);
+      await pushQuoteStage(input.id, before, "approved");
       return { ok: true, message: `Approved and signed by ${name}.` };
     }
 
     case "quote.job": {
       if (!DB_LIVE) return { ok: false, message: NEEDS_DB };
+      const before = getQuote(input.id)?.status;
       const id = await convertQuoteToJob(input.id);
       const number = getQuote(input.id)?.number;
+      await pushQuoteStage(input.id, before, "converted", `Agreement signed — quote #${number} converted to a job in HydroDam Ops.`);
       return { ok: true, message: `Quote #${number} is now a job.`, href: `/jobs/${id}` };
     }
 

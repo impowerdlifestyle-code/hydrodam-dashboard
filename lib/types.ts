@@ -47,6 +47,12 @@ export type Client = {
   tags: string[];
   createdAt: string;
   hubspotContactId?: string;
+  /** HubSpot's lead status, mapped and raw. The journey reads both. */
+  crmStatus?: RequestStatus;
+  crmStatusLabel?: string;
+  /** The associated deal, so a status change here can move the stage there. */
+  hubspotDealId?: string;
+  hubspotDealStage?: string;
   /**
    * Set only when HubSpot itself says money was committed: a deal that reached
    * `closedwon`, or a contact HubSpot moved to the `customer` lifecycle stage.
