@@ -47,6 +47,21 @@ export type Client = {
   tags: string[];
   createdAt: string;
   hubspotContactId?: string;
+  /**
+   * Set only when HubSpot itself says money was committed: a deal that reached
+   * `closedwon`, or a contact HubSpot moved to the `customer` lifecycle stage.
+   *
+   * Deliberately narrow. A deal sitting in `appointmentscheduled` with an
+   * `amount` on it is an estimate-calculator range, not revenue, and a
+   * `closedate` on such a deal is HubSpot's default projection rather than a
+   * close — reading either as "paid" would put invented money on Mady's
+   * dashboard. Absent means absent.
+   */
+  paid?: {
+    via: "closed_won_deal" | "lifecycle_customer";
+    at?: string;
+    amountCents?: number;
+  };
   /** Seeded demo row. Hidden from Clients/Requests once the CRM is connected. */
   demo?: boolean;
 };

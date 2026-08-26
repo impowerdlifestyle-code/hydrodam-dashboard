@@ -92,8 +92,12 @@ export const crmStatus = () => ({
   live: CRM_LIVE && crmCache !== null,
   contactCount: crmCache?.contactCount,
   addressedCount: crmCache?.addressedCount,
+  paidCount: crmCache?.paidCount,
   fetchedAt: crmCache?.fetchedAt,
 });
+
+/** Clients HubSpot marks as won or customer. See `Client["paid"]`. */
+export const paidClients = (): Client[] => liveClients().filter((c) => c.paid);
 
 async function ensureCrmCache(): Promise<void> {
   if (!CRM_LIVE) return;

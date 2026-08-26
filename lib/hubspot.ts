@@ -28,7 +28,7 @@ const CONTACT_PROPS = [
   "lead_source", "contact_form", "comments_or_questions",
 ] as const;
 
-const DEAL_PROPS = ["dealname", "amount", "dealstage", "createdate"] as const;
+const DEAL_PROPS = ["dealname", "amount", "dealstage", "createdate", "closedate", "hs_is_closed_won"] as const;
 
 type HsRecord = { id: string; properties: Record<string, string | null> };
 
@@ -133,6 +133,36 @@ function rangeFromDealName(name: string): { lowCents?: number; highCents?: numbe
   return { lowCents: n(m[1]), highCents: n(m[2]) };
 }
 
+/**
+ * The only two things in this portal that mean money was committed.
+ *
+ * `hs_is_closed_won` is HubSpot's own computed flag, so it stays correct if
+ * HydroDam renames the stage or adds a second pipeline; the literal
+ * `closedwon` check is the fallback for portals where the flag is not set.
+ * A `closedate` is NOT consulted: HubSpot stamps a default projected close on
+ * deals that are still open, and 115 of this portal's 153 deals carry one
+ * while none of them are won.
+ */
+function paidFrom(
+  contact: Record<string, string | null>,
+  deal: HsRecord | undefined,
+): Client["paid"] {
+  const d = deal?.properties;
+  const won = d?.hs_is_closed_won === "true" || d?.dealstage === "closedwon";
+  if (won) {
+    const amount = Number(d?.amount);
+    return {
+      via: "closed_won_deal",
+      at: d?.closedate ?? undefined,
+      amountCents: Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) : undefined,
+    };
+  }
+  if (contact.lifecyclestage === "customer") {
+    return { via: "lifecycle_customer" };
+  }
+  return undefined;
+}
+
 function displayName(p: Record<string, string | null>): string {
   const name = [p.firstname, p.lastname].filter(Boolean).join(" ").trim();
   return name || p.email || "Unnamed contact";
@@ -145,6 +175,8 @@ export type CrmSnapshot = {
   fetchedAt: string;
   contactCount: number;
   addressedCount: number;
+  /** Contacts HubSpot marks as won or customer. Zero is a real answer. */
+  paidCount: number;
 };
 
 /**
@@ -160,7 +192,7 @@ export type CrmSnapshot = {
  * of a dashboard reporting zero contacts. The caller treats a throw as "leave
  * the last good snapshot alone".
  */
-const cachedFetch = unstable_cache(fetchCrmUncached, ["hubspot-crm-snapshot"], {
+const cachedFetch = unstable_cache(fetchCrmUncached, ["hubspot-crm-snapshot-v2"], {
   revalidate: 600,
   tags: ["crm"],
 });
@@ -193,6 +225,7 @@ async function fetchCrmUncached(): Promise<CrmSnapshot> {
     const id = `hs_${c.id}`;
     const createdAt = p.createdate ?? new Date().toISOString();
     const status = LEAD_STATUS[p.hs_lead_status ?? ""] ?? "new";
+    const dealForContact = dealByContact.get(c.id);
 
     clients.push({
       id,
@@ -208,6 +241,7 @@ async function fetchCrmUncached(): Promise<CrmSnapshot> {
       tags: p.hs_lead_status ? [p.hs_lead_status] : [],
       createdAt,
       hubspotContactId: c.id,
+      paid: paidFrom(p, dealForContact),
     });
 
     // A street line alone is enough to be worth measuring. City/zip are sparser
@@ -224,7 +258,7 @@ async function fetchCrmUncached(): Promise<CrmSnapshot> {
       });
     }
 
-    const deal = dealByContact.get(c.id);
+    const deal = dealForContact;
     const range = deal ? rangeFromDealName(deal.properties.dealname ?? "") : {};
 
     requests.push({
@@ -252,5 +286,6 @@ async function fetchCrmUncached(): Promise<CrmSnapshot> {
     fetchedAt: new Date().toISOString(),
     contactCount: contacts.length,
     addressedCount: properties.length,
+    paidCount: clients.filter((c) => c.paid).length,
   };
 }
