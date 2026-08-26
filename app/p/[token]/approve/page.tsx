@@ -6,7 +6,7 @@ import { PortalApproval } from "@/components/PortalApproval";
 import {
   ACKNOWLEDGMENT, AGREEMENT_VERSION, ESIGN_CONSENT, TERMS_OF_SALE, WARRANTY, type Clause,
 } from "@/lib/agreement";
-import { DB_LIVE, db, ensureData, getClient, getQuote, quotesFor } from "@/lib/db";
+import { DB_LIVE, db, ensureData, getClient, getQuote, isApprovable, portalQuote } from "@/lib/db";
 import { money, shortDate } from "@/lib/format";
 import { resolvePortalToken } from "@/lib/portal";
 
@@ -41,16 +41,16 @@ export default async function PortalApprovePage({ params }: { params: Promise<{ 
   const clientId = await resolveClient(token);
   if (!clientId) notFound();
 
-  // Newest first: snapshot order is not guaranteed, and "your quote" means the
-  // current one, not the first one they were ever sent.
-  const quote = quotesFor(clientId)
-    .filter((q) => !["declined", "expired"].includes(q.status))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  // portalQuote is the same rule the portal page renders from. When these were
+  // two separate expressions, this page presented and signed a different quote
+  // than the one the customer had just been looking at.
+  const quote = portalQuote(clientId);
   if (!quote) notFound();
 
   const client = getClient(clientId);
   const prop = db().properties.find((p) => p.id === quote.propertyId);
   const signed = ["approved", "converted"].includes(quote.status);
+  const closed = !signed && !isApprovable(quote);
 
   return (
     <>
@@ -101,7 +101,14 @@ export default async function PortalApprovePage({ params }: { params: Promise<{ 
         Agreement version {AGREEMENT_VERSION}
       </p>
 
-      {signed ? (
+      {closed ? (
+        <div className="mt-6 rounded-2xl border border-line p-5">
+          <p className="text-sm leading-relaxed text-ink-dim">
+            This quote is {quote.status} and can no longer be approved online. Get in touch and
+            HydroDam will send a fresh one.
+          </p>
+        </div>
+      ) : signed ? (
         <div className="mt-6 flex items-start gap-3 rounded-2xl border border-good/30 bg-good/10 p-5">
           <span className="mt-0.5 shrink-0 text-good"><Icon name="check" size={18} /></span>
           <p className="text-sm leading-relaxed text-good">

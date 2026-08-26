@@ -235,6 +235,30 @@ export function quotesFor(clientId: string): Quote[] {
   return db().quotes.filter((q) => q.clientId === clientId);
 }
 
+/**
+ * The one quote the customer portal is allowed to talk about.
+ *
+ * There used to be two answers to "which quote is theirs" — the portal took the
+ * newest of everything, the approve page took the newest that was not declined
+ * or expired — so a client whose newest quote was declined saw its line items
+ * and total, clicked approve, and signed the older one underneath at a
+ * different price. One rule, used by both, is the fix.
+ *
+ * A draft is excluded because it was never presented. That is not a cosmetic
+ * point: `api_quote_approve` promotes a draft to sent rather than refusing it,
+ * so an internal work-in-progress left visible here was genuinely signable.
+ */
+export function portalQuote(clientId: string): Quote | undefined {
+  return quotesFor(clientId)
+    .filter((q) => q.status !== "draft")
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+}
+
+/** Only these two reach `approved`; the rest is history the customer can read. */
+export function isApprovable(quote: Quote | undefined): boolean {
+  return quote ? ["sent", "viewed"].includes(quote.status) : false;
+}
+
 export function jobsFor(clientId: string): Job[] {
   return db().jobs.filter((j) => j.clientId === clientId);
 }

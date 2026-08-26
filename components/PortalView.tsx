@@ -3,7 +3,7 @@ import { Icon } from "@/components/Icon";
 import { Badge, Stepper } from "@/components/ui";
 import { JOURNEY } from "@/lib/data";
 import {
-  getClient, invoicesFor, jobsFor, nextVisitFor, propertyFor, quotesFor,
+  getClient, invoicesFor, isApprovable, jobsFor, nextVisitFor, portalQuote, propertyFor,
 } from "@/lib/db";
 import { longDate, money, shortDate, timeRange } from "@/lib/format";
 
@@ -28,10 +28,9 @@ export function PortalView({
   if (!client) return null;
 
   const prop = propertyFor(clientId);
-  const quotes = quotesFor(clientId);
   const jobs = jobsFor(clientId);
   const invoices = invoicesFor(clientId);
-  const quote = [...quotes].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const quote = portalQuote(clientId);
   const job = [...jobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
   const nextVisit = job ? nextVisitFor(job.id) : undefined;
   const balance = invoices.reduce((s, i) => s + (i.totalCents - i.amountPaidCents), 0);
@@ -114,7 +113,12 @@ export function PortalView({
             </div>
           </dl>
 
-          {!["approved", "converted"].includes(quote.status) ? (
+          {["approved", "converted"].includes(quote.status) ? (
+            <p className="mt-4 flex items-center gap-2 rounded-xl border border-good/30 bg-good/10 px-3 py-2.5 text-xs text-good">
+              <Icon name="check" size={14} />
+              Approved{quote.approvedByName ? ` by ${quote.approvedByName}` : ""} on {shortDate(quote.approvedAt)}.
+            </p>
+          ) : isApprovable(quote) ? (
             approveHref ? (
               <Link
                 href={approveHref}
@@ -128,9 +132,9 @@ export function PortalView({
               </p>
             )
           ) : (
-            <p className="mt-4 flex items-center gap-2 rounded-xl border border-good/30 bg-good/10 px-3 py-2.5 text-xs text-good">
-              <Icon name="check" size={14} />
-              Approved{quote.approvedByName ? ` by ${quote.approvedByName}` : ""} on {shortDate(quote.approvedAt)}.
+            <p className="mt-4 rounded-xl border border-line/60 px-3 py-2.5 text-xs leading-relaxed text-ink-dim">
+              This quote is {quote.status} and can no longer be approved online. Get in touch and
+              HydroDam will send a fresh one.
             </p>
           )}
         </section>

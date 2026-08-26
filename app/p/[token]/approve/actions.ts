@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { AGREEMENT_VERSION, ESIGN_CONSENT } from "@/lib/agreement";
-import { DB_LIVE, ensureData, getQuote, invalidate } from "@/lib/db";
+import { DB_LIVE, ensureData, getQuote, invalidate, isApprovable } from "@/lib/db";
 import { resolvePortalToken } from "@/lib/portal";
 import * as pg from "@/lib/supabase";
 
@@ -47,6 +47,15 @@ export async function approveFromPortal(
   }
   if (["approved", "converted"].includes(quote.status)) {
     return { ok: true, message: "Already approved — thank you." };
+  }
+  // api_quote_approve promotes a draft to sent rather than refusing it, so the
+  // status gate has to live here. A page rendered before the office withdrew a
+  // quote must not be able to sign it on its way out.
+  if (!isApprovable(quote)) {
+    return {
+      ok: false,
+      message: `This quote is ${quote.status} and can no longer be approved online. Please contact HydroDam.`,
+    };
   }
 
   await pg.rpc("api_quote_approve", {

@@ -36,7 +36,11 @@ export function useOps() {
       const res = await runOps(input);
       setFeedback(res);
       if (res.href) router.push(res.href);
-      else router.refresh();
+      // A revealed secret is shown once and the refresh is inside this
+      // transition, so refreshing here keeps the button on "Working…" until a
+      // cold /clients has re-paged the CRM — seconds during which the only copy
+      // of the token is not on screen. Nothing on the page depends on it.
+      else if (!res.reveal) router.refresh();
     });
   };
 
@@ -59,26 +63,50 @@ export function OpsToast({ feedback }: { feedback: Feedback }) {
   );
 }
 
-/** A secret the server will not hand over twice. Select-all on click. */
+/**
+ * A secret the server will not hand over twice. Select-all on click.
+ *
+ * The clipboard is the part that has to be honest. `navigator.clipboard` is
+ * absent on an insecure origin and `writeText` rejects when the document is not
+ * focused, and the old version swallowed both — the button never changed, so
+ * you walked away believing you had copied a link that the server will never
+ * show you again. A failure now says so and points at the field, which is
+ * select-all-on-click for exactly this reason.
+ */
 function RevealOnce({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+
+  const copy = async () => {
+    try {
+      if (!navigator.clipboard) throw new Error("no clipboard");
+      await navigator.clipboard.writeText(value);
+      setState("copied");
+      setTimeout(() => setState("idle"), 2500);
+    } catch {
+      setState("failed");
+    }
+  };
+
   return (
-    <div className="mt-2 flex items-center gap-2">
-      <input
-        readOnly
-        value={value}
-        onFocus={(e) => e.currentTarget.select()}
-        className="min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 py-2 font-mono text-[11px] text-ink"
-      />
-      <button
-        type="button"
-        className={buttonClass("outline", "sm")}
-        onClick={() => {
-          navigator.clipboard?.writeText(value).then(() => setCopied(true), () => setCopied(false));
-        }}
-      >
-        {copied ? "Copied" : "Copy"}
-      </button>
+    <div className="mt-2">
+      <div className="flex items-center gap-2">
+        <input
+          readOnly
+          value={value}
+          onFocus={(e) => e.currentTarget.select()}
+          className="min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 py-2 font-mono text-[11px] text-ink"
+        />
+        <button type="button" className={buttonClass("outline", "sm")} onClick={copy}>
+          {state === "copied" ? "Copied" : "Copy"}
+        </button>
+      </div>
+      {state === "failed" && (
+        <p className="mt-1.5 flex items-start gap-2 text-[11px] leading-relaxed text-warn">
+          <span className="mt-px shrink-0"><Icon name="alert" size={12} /></span>
+          The browser refused the clipboard. Click the field to select the link and copy it
+          yourself — it will not be shown again.
+        </p>
+      )}
     </div>
   );
 }
