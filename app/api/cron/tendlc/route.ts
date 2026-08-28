@@ -18,11 +18,18 @@ export const maxDuration = 60;
  * undocumented and has already misled us twice: `status: ACTIVE` on a campaign
  * Telnyx had rejected, and `TELNYX_FAILED` logged for six days as though it
  * were an ordinary queue wait. The assignment attempt is the test — 10036 means
- * keep waiting, a clean response means done.
+ * keep waiting, a clean response means the assignment was accepted.
+ *
+ * Accepted is still not delivering. `assignmentStatus` has to reach ASSIGNED
+ * before a send rides the campaign, so that is the only thing this treats as
+ * done.
  */
 const CAMPAIGN_ID = "4b3001a0-185c-263b-31a6-c1ca1f05c12a";
 const NUMBER = "+17273518152";
 const DEAD = new Set(["TELNYX_FAILED", "TCR_FAILED", "MNO_REJECTED", "EXPIRED", "DEACTIVATED"]);
+// assignmentStatus values that mean the number really is riding the campaign.
+// PENDING_ASSIGNMENT is not one of them, however inviting the record looks.
+const ASSIGNED = new Set(["ASSIGNED"]);
 
 async function telnyx(path: string, init?: RequestInit) {
   const res = await fetch(`https://api.telnyx.com${path}`, {
@@ -61,11 +68,34 @@ export async function GET(req: Request) {
   }
 
   // Ask whether the number is already on the campaign before trying to put it
-  // there. This is what keeps the success email to exactly one: after the run
-  // that assigns it, every later run stops here and says nothing.
+  // there, so the POST below runs only while there is nothing to find.
+  //
+  // The existence of this record is NOT the finish line. On 2026-08-28 the POST
+  // returned clean and the record appeared reading PENDING_ASSIGNMENT with
+  // nonTmobileNumberMappingStatus ADDED — and a live send to a Verizon mobile
+  // still came back 40010 "not 10DLC-registered", with tcr_campaign_id null on
+  // the message. Only assignmentStatus === ASSIGNED means sends ride the
+  // campaign; the per-carrier mapping fields do not gate delivery on their own.
   const existing = await telnyx(`/10dlc/phone_number_campaigns/${encodeURIComponent(NUMBER)}`);
   if (!existing?.errors) {
-    return NextResponse.json({ ok: true, state: "already-assigned", number: NUMBER });
+    const assignmentStatus: string = existing?.assignmentStatus ?? "unknown";
+    if (!ASSIGNED.has(assignmentStatus)) {
+      return NextResponse.json({ ok: true, state: "assignment-pending", assignmentStatus });
+    }
+    // Assignment is in force: outbound works and this job has nothing left to
+    // do, ever. There is no store here to record "already told him" — adding
+    // one would put a Postgres dependency in a route that is otherwise a pure
+    // Telnyx poller — so the clock is the state, the same trick the rejection
+    // nag uses. This runs at :17 past, so pinning the hour makes it one mail a
+    // day, and the mail asks for the cron entry to be deleted, which ends it.
+    if (new Date().getUTCHours() === 13) {
+      await notify(
+        "HydroDam 10DLC assigned — outbound SMS is live, delete this cron",
+        `${NUMBER} reached <b>${assignmentStatus}</b> on campaign C22996K, so outbound to real carriers is no longer filtered.`,
+        "Send a live test to a real mobile to confirm. Then remove the tendlc entry from vercel.json — this job has nothing left to watch, and until it goes it will send this once a day.",
+      );
+    }
+    return NextResponse.json({ ok: true, state: "assigned", assignmentStatus, number: NUMBER });
   }
 
   const campaign = await telnyx(`/10dlc/campaign/${CAMPAIGN_ID}`);
