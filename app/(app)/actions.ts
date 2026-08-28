@@ -7,7 +7,7 @@ import {
   DB_LIVE, addTeammate, approveQuote, clockIn, clockOut, convertQuoteToJob, createInvoice,
   addOpening, createQuote, createVisit, ensureData, getJob, getQuote, getRequest, getVisit,
   moveVisit, openingsFor, realClientId, realRequestId, recordPayment, removeOpening, saveChecklist,
-  saveProperty, getClient,
+  saveProperty, getClient, existingClientId,
   setTeammateActive, toggleAutomation, updateInvoice, updateJob, updateQuote, updateRequest,
   updateVisit,
 } from "@/lib/db";
@@ -131,6 +131,24 @@ function humanise(err: unknown): string {
  * move was legal, so syncing off the intended status would push a stage change
  * for a transition Postgres refused.
  */
+/**
+ * The origin a customer's portal link should point at.
+ *
+ * It used to be the request's own Host header, so minting while on a
+ * deployment-specific preview URL — hydrodam-dashboard-5p4f08i7d-….vercel.app —
+ * produced a ninety-day customer link on a hostname that stops resolving as
+ * soon as the next deploy supersedes it. The canonical origin is a setting, not
+ * something to read off whichever URL the office happened to be browsing.
+ */
+async function portalOrigin(): Promise<string> {
+  const configured = process.env.PORTAL_BASE_URL?.replace(/\/+$/, "");
+  if (configured) return configured;
+
+  const host = (await headers()).get("host") ?? "";
+  if (host.startsWith("localhost") || host.startsWith("127.0.0.1")) return `http://${host}`;
+  return "https://hydrodam-dashboard.vercel.app";
+}
+
 async function pushQuoteStage(
   quoteId: string,
   from: string | undefined,
@@ -404,19 +422,20 @@ async function dispatch(input: OpsInput): Promise<OpsResult> {
       const token = await mintPortalLink({ clientId, quoteId: input.quoteId, jobId: input.jobId });
       if (!token) return { ok: false, message: "Could not mint a link." };
 
-      const head = await headers();
-      const host = head.get("host") ?? "hydrodam-dashboard.vercel.app";
-      const scheme = host.startsWith("localhost") ? "http" : "https";
       return {
         ok: true,
         message: "Link created. It is shown once — copy it now.",
-        reveal: `${scheme}://${host}/p/${token}`,
+        reveal: `${await portalOrigin()}/p/${token}`,
       };
     }
 
     case "portal.revoke": {
       if (!DB_LIVE) return { ok: false, message: NEEDS_DB };
-      const { clientId } = await realClientId(input.clientId);
+      // Deliberately NOT realClientId: that promotes a HubSpot lead into a real
+      // client row, and creating a record is a strange thing for a revoke to
+      // do. A lead that was never promoted cannot hold a link either.
+      const clientId = existingClientId(input.clientId);
+      if (!clientId) return { ok: true, message: "No links have ever been issued for this contact." };
       await revokePortalLinks(clientId);
       return { ok: true, message: "Every outstanding link for this client is dead." };
     }

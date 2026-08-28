@@ -527,6 +527,21 @@ export function crewUtilization(): { staffId: string; name: string; minutes: num
 // mutating the snapshot in place, which is enough to click through locally.
 
 /** A HubSpot lead has no Postgres row until ops touches it. This is that touch. */
+/**
+ * The real clients-table id for something the UI is holding, WITHOUT promoting.
+ *
+ * `realClientId` creates a client row for a HubSpot lead that does not have one
+ * yet, which is right when the caller is about to write something that needs a
+ * client. It is wrong for a read, or for a revoke — undefined here means "no
+ * such row", not "make one".
+ */
+export function existingClientId(clientId: string): string | undefined {
+  const client = getClient(clientId);
+  if (!client) return undefined;
+  if (!DB_LIVE || !client.id.startsWith("hs_")) return client.id;
+  return db().clients.find((c) => c.hubspotContactId === client.hubspotContactId && !c.id.startsWith("hs_"))?.id;
+}
+
 export async function realClientId(clientId: string): Promise<{ clientId: string; propertyId?: string }> {
   const client = getClient(clientId);
   if (!client) throw new Error(`No client ${clientId}`);
