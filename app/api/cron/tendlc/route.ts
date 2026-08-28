@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { hasSession } from "@/lib/session";
+import { sendEmail, shell, p as para } from "@/lib/mail";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +38,18 @@ async function telnyx(path: string, init?: RequestInit) {
   return res.json().catch(() => ({}));
 }
 
+async function notify(subject: string, lead: string, detail: string): Promise<void> {
+  try {
+    await sendEmail({
+      to: "ciaran@ctox.com",
+      subject,
+      html: shell({ heading: subject, body: para(lead) + para(detail) }),
+    });
+  } catch {
+    // An alert that cannot be delivered must not fail the run that produced it.
+  }
+}
+
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
   const fromCron = Boolean(secret) && req.headers.get("authorization") === `Bearer ${secret}`;
@@ -45,6 +58,14 @@ export async function GET(req: Request) {
   }
   if (!process.env.TELNYX_API_KEY) {
     return NextResponse.json({ ok: false, error: "TELNYX_API_KEY unset." }, { status: 500 });
+  }
+
+  // Ask whether the number is already on the campaign before trying to put it
+  // there. This is what keeps the success email to exactly one: after the run
+  // that assigns it, every later run stops here and says nothing.
+  const existing = await telnyx(`/10dlc/phone_number_campaigns/${encodeURIComponent(NUMBER)}`);
+  if (!existing?.errors) {
+    return NextResponse.json({ ok: true, state: "already-assigned", number: NUMBER });
   }
 
   const campaign = await telnyx(`/10dlc/campaign/${CAMPAIGN_ID}`);
@@ -56,6 +77,16 @@ export async function GET(req: Request) {
   );
 
   if (DEAD.has(campaignStatus)) {
+    // Once a day, not once an hour. There is nowhere to record "already told
+    // him" without a migration, so the clock is the state: this runs at :17
+    // past, so pinning the hour makes it a single daily nag.
+    if (new Date().getUTCHours() === 13) {
+      await notify(
+        `HydroDam 10DLC rejected (${campaignStatus})`,
+        `Campaign C22996K is <b>${campaignStatus}</b>. ${NUMBER} is still unassigned and outbound SMS stays carrier-filtered.`,
+        reasons.join("; ") || "No reason given.",
+      );
+    }
     return NextResponse.json({ ok: false, state: "rejected", campaignStatus, reasons });
   }
 
@@ -66,6 +97,11 @@ export async function GET(req: Request) {
   const errors: { code?: string | number; detail?: string }[] = assign?.errors ?? [];
 
   if (!errors.length) {
+    await notify(
+      "HydroDam 10DLC approved — number assigned",
+      `${NUMBER} is now riding campaign C22996K. Outbound SMS to real carriers should stop being filtered.`,
+      "Send a live test to a real mobile before trusting it.",
+    );
     return NextResponse.json({ ok: true, state: "assigned", campaignStatus, number: NUMBER });
   }
   if (String(errors[0]?.code) === "10036") {
