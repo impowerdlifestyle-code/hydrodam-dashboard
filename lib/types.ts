@@ -64,7 +64,7 @@ export type Client = {
    * dashboard. Absent means absent.
    */
   paid?: {
-    via: "closed_won_deal" | "lifecycle_customer";
+    via: "closed_won_deal" | "lifecycle_customer" | "lead_status_invoice_paid";
     at?: string;
     amountCents?: number;
   };

@@ -111,19 +111,24 @@ async function dealContactIds(dealIds: string[]): Promise<Map<string, string>> {
 // HubSpot's lead status is the only signal for where a lead actually stands —
 // lifecyclestage is 98% "lead" and the custom pipeline fields were never filled in.
 const LEAD_STATUS: Record<string, RequestStatus> = {
-  NEW: "new",
-  OPEN: "new",
-  OPEN_DEAL: "assessment_scheduled",
-  ATTEMPTED_TO_CONTACT: "contacted",
-  CONNECTED: "contacted",
-  IN_PROGRESS: "contacted",
+  // HubSpot's internal values keep their default names, but Mady relabelled
+  // them in the portal, and the LABEL is what her pipeline means. Read the
+  // comment, not the key: OPEN is "Estimate Needed", CONNECTED is "Estimate
+  // Created", IN_PROGRESS is "Measurement Scheduled", OPEN_DEAL is "Invoice
+  // Paid". Mapping these by their default meaning put 42 paying customers on
+  // the board as "assessment scheduled".
+  NEW: "new",                                         // New
+  ATTEMPTED_TO_CONTACT: "contacted",                  // Attempted to Contact
   "Future Follow Up": "contacted",
+  BAD_TIMING: "contacted",                            // Bad Timing: not dead, just later
+  IN_PROGRESS: "assessment_scheduled",                // Measurement Scheduled
+  "Awiting Customer Measurements": "assessed",        // Mady's spelling, live in the portal. Do not "correct" it.
+  OPEN: "assessed",                                   // Estimate Needed
   "Itimized Estimate Pending": "assessed",
-  // Mady's own spelling, live in the portal. Do not "correct" it.
-  "Awiting Customer Measurements": "assessed",
-  BAD_TIMING: "unqualified",
+  CONNECTED: "assessed",                              // Estimate Created
+  OPEN_DEAL: "converted",                             // Invoice Paid
+  UNQUALIFIED: "unqualified",                         // Declined
   "Declined Itimized Estimate": "unqualified",
-  UNQUALIFIED: "unqualified",
   "Inadequate Contact Info": "unqualified",
 };
 
@@ -150,8 +155,19 @@ function requestStatusFor(raw: string | null): RequestStatus {
 
 const SOURCE_LABEL: Record<string, string> = {
   NEW: "Website",
-  OPEN_DEAL: "Estimate calculator",
 };
+
+/** The portal's own label for each lead status value, so screens say "Invoice Paid", not OPEN_DEAL. */
+async function leadStatusLabels(): Promise<Record<string, string>> {
+  const prop = await hsRequest<{ options?: { value: string; label: string }[] }>("/crm/v3/properties/contacts/hs_lead_status", "GET", undefined);
+  return Object.fromEntries((prop?.options ?? []).map((o) => [o.value, o.label]));
+}
+
+/** Where the contact sits in HubSpot right now, for the forward-only write-back. */
+export async function contactLeadStatus(contactId: string): Promise<string | null> {
+  const c = await hsRequest<{ properties?: { hs_lead_status?: string | null } }>(`/crm/v3/objects/contacts/${contactId}?properties=hs_lead_status`, "GET", undefined);
+  return c?.properties?.hs_lead_status ?? null;
+}
 
 /** Deal names carry the calculator's own range: "Name — Sentinel Series ($6,400 to $8,500)". */
 function rangeFromDealName(name: string): { lowCents?: number; highCents?: number } {
@@ -188,6 +204,12 @@ function paidFrom(
   if (contact.lifecyclestage === "customer") {
     return { via: "lifecycle_customer" };
   }
+  // Mady works the lead status, not the deal pipeline: 160 deals sit at
+  // "Appointment Scheduled" and none are won, while 42 contacts are marked
+  // Invoice Paid. That label is the portal's real "money committed" signal.
+  if (contact.hs_lead_status === "OPEN_DEAL") {
+    return { via: "lead_status_invoice_paid" };
+  }
   return undefined;
 }
 
@@ -220,8 +242,8 @@ export type CrmSnapshot = {
  * of a dashboard reporting zero contacts. The caller treats a throw as "leave
  * the last good snapshot alone".
  */
-const cachedFetch = unstable_cache(fetchCrmUncached, ["hubspot-crm-snapshot-v2"], {
-  revalidate: 600,
+const cachedFetch = unstable_cache(fetchCrmUncached, ["hubspot-crm-snapshot-v3"], {
+  revalidate: 300,
   tags: ["crm"],
 });
 
@@ -235,6 +257,7 @@ async function fetchCrmUncached(): Promise<CrmSnapshot> {
   const contacts = await searchAll("contacts", CONTACT_PROPS, 5000);
   if (!contacts.length) throw new Error("HubSpot returned no contacts — token or rate limit.");
   const deals = await searchAll("deals", DEAL_PROPS, 1000);
+  const labels = await leadStatusLabels();
 
   const dealByContact = new Map<string, HsRecord>();
   const assoc = await dealContactIds(deals.map((d) => d.id));
@@ -266,11 +289,11 @@ async function fetchCrmUncached(): Promise<CrmSnapshot> {
       leadSource: p.lead_source ?? (p.contact_form ? "Website form" : "HubSpot"),
       // HubSpot has no consent record. Nobody here has opted in to SMS.
       smsConsent: false,
-      tags: p.hs_lead_status ? [p.hs_lead_status] : [],
+      tags: p.hs_lead_status ? [labels[p.hs_lead_status] ?? p.hs_lead_status] : [],
       createdAt,
       hubspotContactId: c.id,
       crmStatus: status,
-      crmStatusLabel: p.hs_lead_status ?? undefined,
+      crmStatusLabel: p.hs_lead_status ? (labels[p.hs_lead_status] ?? p.hs_lead_status) : undefined,
       hubspotDealId: dealForContact?.id,
       hubspotDealStage: dealForContact?.properties.dealstage ?? undefined,
       paid: paidFrom(p, dealForContact),

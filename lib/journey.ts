@@ -42,7 +42,9 @@ function fromCrm(client: Client): Journey {
   // A won deal is the one CRM signal that means money was committed, so it
   // outranks the lead status sitting next to it.
   if (client.paid) {
-    return { current: 3, applicable: true, caption: "Closed won in HubSpot", source: "crm" };
+    return client.paid.via === "lead_status_invoice_paid"
+      ? { current: 4, applicable: true, caption: "Invoice paid in HubSpot", source: "crm" }
+      : { current: 3, applicable: true, caption: "Closed won in HubSpot", source: "crm" };
   }
 
   switch (client.crmStatus) {
@@ -53,7 +55,7 @@ function fromCrm(client: Client): Journey {
         ? { current: 1, applicable: true, caption: label, source: "crm" }
         : { current: 2, applicable: true, caption: label, source: "crm" };
     case "assessment_scheduled":
-      return { current: 0, applicable: true, caption: "Assessment booked", source: "crm" };
+      return { current: 0, applicable: true, caption: label ?? "Measurement scheduled", source: "crm" };
     case "contacted":
       return { current: 0, applicable: true, caption: `Contacted — ${label}`, source: "crm" };
     default:

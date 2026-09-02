@@ -1,5 +1,5 @@
 import "server-only";
-import { hsPatch, hsNote, dealIdForContact } from "@/lib/hubspot";
+import { hsPatch, hsNote, dealIdForContact, contactLeadStatus } from "@/lib/hubspot";
 import * as pg from "@/lib/supabase";
 import { SUPABASE_LIVE } from "@/lib/supabase";
 
@@ -43,6 +43,49 @@ const rank = (stage: string | undefined): number =>
 
 type Transition = { entity: string; from: string; to: string };
 
+/**
+ * The lead status is the pipeline Mady actually works (the deal stages sit
+ * untouched at "Appointment Scheduled"), so a dashboard step also sets the
+ * contact's hs_lead_status to the portal's own label for that step. Keys are
+ * HubSpot's internal values; the comment is what the portal shows.
+ */
+const LEAD_STATUS_FOR: Record<string, string> = {
+  "request:contacted": "ATTEMPTED_TO_CONTACT",          // Attempted to Contact
+  "request:assessment_scheduled": "IN_PROGRESS",        // Measurement Scheduled
+  "request:assessed": "Itimized Estimate Pending",
+  "request:unqualified": "UNQUALIFIED",                 // Declined
+  "quote:sent": "CONNECTED",                            // Estimate Created
+  "quote:declined": "Declined Itimized Estimate",
+  "invoice:paid": "OPEN_DEAL",                          // Invoice Paid
+};
+
+const LEAD_ORDER = [
+  "NEW", "ATTEMPTED_TO_CONTACT", "Future Follow Up", "BAD_TIMING", "IN_PROGRESS",
+  "Awiting Customer Measurements", "OPEN", "Itimized Estimate Pending", "CONNECTED", "OPEN_DEAL",
+];
+const LEAD_TERMINAL = new Set(["OPEN_DEAL"]);
+const LEAD_DECLINED = new Set(["UNQUALIFIED", "Declined Itimized Estimate", "Inadequate Contact Info"]);
+const leadRank = (v: string | null): number => (v ? LEAD_ORDER.indexOf(v) : -1);
+
+async function pushLeadStatus(transition: Transition, contactId: string): Promise<void> {
+  const target = LEAD_STATUS_FOR[`${transition.entity}:${transition.to}`];
+  if (!target) return;
+  const current = await contactLeadStatus(contactId);
+  if (current === target) return;
+  if (current && LEAD_TERMINAL.has(current)) {
+    console.warn(`[crm-sync] contact ${contactId} is ${current}; not moving to ${target}`);
+    return;
+  }
+  // A decline can be recorded from any open state. A step forward only ever
+  // moves the status forward, so a replayed action cannot drag it back.
+  if (!LEAD_DECLINED.has(target) && current && !LEAD_DECLINED.has(current) && leadRank(target) <= leadRank(current)) {
+    console.warn(`[crm-sync] contact ${contactId} is already ${current}; ${target} is not forward`);
+    return;
+  }
+  await hsPatch(`/crm/v3/objects/contacts/${contactId}`, { properties: { hs_lead_status: target } });
+  console.info(`[crm-sync] contact ${contactId} lead status ${current ?? "none"} -> ${target}`);
+}
+
 async function effectsFor({ entity, from, to }: Transition): Promise<string[]> {
   if (!SUPABASE_LIVE) return [];
   const [row] = await pg.select<{ effects: string[] }>("status_transitions", {
@@ -65,6 +108,12 @@ export async function syncTransition(
   context: { note?: string } = {},
 ): Promise<void> {
   if (!contactId) return;
+
+  try {
+    await pushLeadStatus(transition, contactId);
+  } catch (err) {
+    console.warn("[crm-sync] lead status push failed", transition, err);
+  }
 
   let effects: string[];
   try {

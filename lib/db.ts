@@ -80,7 +80,12 @@ export function invalidate(): void {
 // sources are merged for display: Postgres first, then any HubSpot lead that
 // has not been promoted.
 
-const CRM_TTL_MS = 10 * 60_000;
+const CRM_TTL_MS = 5 * 60_000;
+
+/** Forces the next read to go back to HubSpot. Pair with revalidateTag("crm") so the data cache drops too. */
+export function invalidateCrm(): void {
+  crmLoadedAt = 0;
+}
 
 type Crm = Awaited<ReturnType<typeof fetchCrm>>;
 

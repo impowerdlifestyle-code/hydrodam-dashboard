@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Badge, PageHeader, Panel, RowLink, StatCard, Table, Td, Th } from "@/components/ui";
+import { RefreshCrm } from "@/components/RefreshCrm";
 import { crmStatus, db, ensureData, invoicesFor, jobsFor, liveClients, paidClients, propertyFor } from "@/lib/db";
 import { compactMoney, money, phoneDisplay, relative } from "@/lib/format";
 
@@ -50,6 +51,8 @@ export default async function ClientsPage({
             ? `Live from HubSpot — refreshed ${relative(crm.fetchedAt!)}.`
             : "Every property, job and dollar, by customer."
         }
+      
+        action={crm.live ? <RefreshCrm /> : undefined}
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -80,7 +83,7 @@ export default async function ClientsPage({
             Paid clients
           </h2>
           <p className="text-xs text-ink-faint">
-            A closed-won deal, or a contact HubSpot has moved to the customer stage.
+            A closed-won deal, a contact HubSpot has moved to the customer stage, or a lead status of Invoice Paid.
           </p>
         </div>
         <Panel>

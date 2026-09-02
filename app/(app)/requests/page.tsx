@@ -1,3 +1,4 @@
+import { RefreshCrm } from "@/components/RefreshCrm";
 import Link from "next/link";
 import { EmptyState, PageHeader, Panel, RowLink, StatCard, StatusPill, Table, Td, Th } from "@/components/ui";
 import { clientName, crmStatus, db, ensureData, liveRequests, propertyFor, requestRef, staffName } from "@/lib/db";
@@ -61,6 +62,8 @@ export default async function RequestsPage({
             ? `Live from HubSpot — ${crm.contactCount?.toLocaleString()} contacts, refreshed ${relative(crm.fetchedAt!)}.`
             : "Every inbound lead from the website, calculator and phone."
         }
+      
+        action={crm.live ? <RefreshCrm /> : undefined}
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
