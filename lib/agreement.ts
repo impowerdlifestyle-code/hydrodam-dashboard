@@ -109,5 +109,8 @@ export const TERMS_OF_SALE: Clause[] = [
 export const ACKNOWLEDGMENT =
   "By signing below, I acknowledge that I have reviewed and approved the Project Plan, Warranty, and Purchase Agreement provided by Hydro Dam, LLC. I understand and accept the terms outlined in these documents and authorize Hydro Dam, LLC to proceed accordingly.";
 
+export const SMS_CONSENT =
+  "Yes, text me. I agree to receive text messages from Hydro Dam, LLC about my project, appointments and occasional offers at the mobile number on file. Message and data rates may apply. Reply STOP at any time to opt out.";
+
 export const ESIGN_CONSENT =
   "I agree to do business electronically with Hydro Dam, LLC, and I understand that typing my name below constitutes my legal signature on this agreement, with the same effect as signing on paper.";

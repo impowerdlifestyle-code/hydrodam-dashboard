@@ -7,7 +7,8 @@ import { inboxThreads } from "@/lib/comms";
 import { audienceCounts, listCampaigns } from "@/lib/campaigns";
 import { listItems, type ChecklistSpec } from "@/lib/builder";
 import type { PanelKey } from "@/lib/layout";
-import type { Role } from "@/lib/types";
+import type { Role, Staff } from "@/lib/types";
+import { currentStaff } from "@/lib/whoami";
 import { compactMoney, money, relative, timeRange } from "@/lib/format";
 
 /**
@@ -25,7 +26,13 @@ function Stats() {
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <StatCard label="Open pipeline" value={compactMoney(m.openPipelineCents)} sub={`${m.openQuoteCount} live quotes`} href="/quotes" />
-      <StatCard label="Won this month" value={compactMoney(m.wonThisMonthCents)} sub={`${m.closeRatePct}% close rate`} accent="good" />
+      <StatCard
+        label="Won this month"
+        value={compactMoney(m.wonThisMonthCents)}
+        sub={m.paidThisMonth ? `${m.paidThisMonth} invoice${m.paidThisMonth === 1 ? "" : "s"} paid in HubSpot${m.paidThisMonthEstimated ? ", some values from the website range" : ""}` : `${m.closeRatePct}% close rate`}
+        accent="good"
+        href="/clients?v=customers"
+      />
       <StatCard label="Outstanding" value={compactMoney(m.outstandingCents)} sub={m.overdueCount ? `${money(m.overdueCents)} overdue` : "nothing overdue"} accent={m.overdueCount ? "bad" : "teal"} href="/invoices" />
       <StatCard label="Active jobs" value={m.activeJobs} sub={`${m.visitsToday} visits today`} accent="ember" href="/jobs" />
     </div>
@@ -100,6 +107,52 @@ function Attention() {
         <p className="mt-3 rounded-xl border border-ember/30 bg-ember/10 px-3 py-2 text-xs text-ember">
           <strong>{m.slowResponses}</strong> {m.slowResponses === 1 ? "lead" : "leads"} waited more than 5 minutes for a first reply.
         </p>
+      )}
+    </Panel>
+  );
+}
+
+async function Queue() {
+  const me = await currentStaff();
+  if (!me) {
+    return (
+      <Panel>
+        <SectionLabel>My queue</SectionLabel>
+        <EmptyState icon="user" title="Pick your name in the sidebar" body="Then this shows the requests assigned to you." />
+      </Panel>
+    );
+  }
+  return <QueueFor me={me} />;
+}
+
+function QueueFor({ me }: { me: Staff }) {
+  const mine = liveRequests().filter((r) => r.assignedTo === me.id && !["converted", "unqualified"].includes(r.status));
+  const order = ["new", "contacted", "assessment_scheduled", "assessed"];
+  const groups = order.map((st) => ({ st, rows: mine.filter((r) => r.status === st).sort((a, b) => a.createdAt.localeCompare(b.createdAt)) })).filter((g) => g.rows.length);
+  return (
+    <Panel>
+      <SectionLabel action={link("/requests?o=me", "Open my queue")}>My queue · {mine.length}</SectionLabel>
+      {mine.length === 0 ? (
+        <EmptyState icon="check" title="Nothing assigned to you" body="Take requests from the Requests page and they line up here." />
+      ) : (
+        <div className="flex flex-col gap-3">
+          {groups.map((g) => (
+            <div key={g.st}>
+              <p className="mb-1 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-ink-faint"><StatusPill status={g.st} /> {g.rows.length}</p>
+              <ul className="flex flex-col gap-1">
+                {g.rows.slice(0, 6).map((r) => (
+                  <li key={r.id}>
+                    <Link href={`/requests/${r.id}`} className="flex items-center justify-between gap-3 rounded-xl px-2.5 py-2 transition-colors hover:bg-white/5">
+                      <span className="min-w-0 truncate text-sm text-ink">{clientName(r.clientId)}</span>
+                      <span className="shrink-0 font-mono text-[10px] text-ink-faint">{relative(r.createdAt)}</span>
+                    </Link>
+                  </li>
+                ))}
+                {g.rows.length > 6 && <li className="px-2.5 text-xs text-ink-faint">and {g.rows.length - 6} more</li>}
+              </ul>
+            </div>
+          ))}
+        </div>
       )}
     </Panel>
   );
@@ -281,6 +334,7 @@ export function renderPanel(key: PanelKey, role: Role) {
     case "stats": return <Stats />;
     case "today": return <Today />;
     case "attention": return <Attention />;
+    case "queue": return <Queue />;
     case "requests": return <Requests />;
     case "inbox": return <Inbox />;
     case "crew": return <Crew />;

@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { Icon } from "@/components/Icon";
 import { PortalApproval } from "@/components/PortalApproval";
 import {
-  ACKNOWLEDGMENT, AGREEMENT_VERSION, ESIGN_CONSENT, TERMS_OF_SALE, WARRANTY, type Clause,
+  ACKNOWLEDGMENT, AGREEMENT_VERSION, ESIGN_CONSENT, SMS_CONSENT, TERMS_OF_SALE, WARRANTY, type Clause,
 } from "@/lib/agreement";
 import { DB_LIVE, db, ensureData, getClient, getQuote, isApprovable, portalQuote } from "@/lib/db";
 import { money, shortDate } from "@/lib/format";
@@ -121,6 +121,7 @@ export default async function PortalApprovePage({ params }: { params: Promise<{ 
           token={token}
           quoteId={quote.id}
           consentText={ESIGN_CONSENT}
+          smsConsentText={SMS_CONSENT}
           acknowledgment={ACKNOWLEDGMENT}
           suggestedName={client?.name ?? ""}
         />

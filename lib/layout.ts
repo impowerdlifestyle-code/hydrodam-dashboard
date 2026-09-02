@@ -9,6 +9,7 @@ export const PANELS = {
   stats: "Headline numbers: pipeline, won, outstanding, active jobs",
   today: "Today on the board: every visit scheduled today with crew and status",
   attention: "Needs you: new requests, unread messages, overdue invoices, unscheduled visits",
+  queue: "My queue: the requests assigned to whoever is looking, grouped by status",
   requests: "Newest requests from the website and HubSpot",
   inbox: "Latest text and email threads",
   crew: "Who is on the clock and what each crew member has today",
@@ -22,6 +23,6 @@ export type PanelKey = keyof typeof PANELS;
 
 export const DEFAULT_LAYOUTS: Record<Role, PanelKey[]> = {
   owner: ["stats", "today", "attention", "revenue", "pipeline"],
-  office: ["attention", "today", "requests", "inbox", "checklists", "campaigns"],
+  office: ["queue", "attention", "today", "requests", "inbox", "checklists", "campaigns"],
   crew: ["today", "crew", "checklists"],
 };

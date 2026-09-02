@@ -187,9 +187,31 @@ function rangeFromDealName(name: string): { lowCents?: number; highCents?: numbe
  * deals that are still open, and 115 of this portal's 153 deals carry one
  * while none of them are won.
  */
+/**
+ * When each Invoice Paid contact entered that status. hs_lead_status has no
+ * "date entered" companion property, so the history endpoint is the only
+ * source; forty-odd contacts, one batch call per hundred.
+ */
+async function invoicePaidDates(contactIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (let i = 0; i < contactIds.length; i += 100) {
+    const page = await hsPost<{ results?: { id: string; propertiesWithHistory?: { hs_lead_status?: { value: string; timestamp: string }[] } }[] }>(
+      "/crm/v3/objects/contacts/batch/read",
+      { propertiesWithHistory: ["hs_lead_status"], properties: ["hs_lead_status"], inputs: contactIds.slice(i, i + 100).map((id) => ({ id })) },
+    );
+    for (const r of page?.results ?? []) {
+      const hit = (r.propertiesWithHistory?.hs_lead_status ?? []).find((h) => h.value === "OPEN_DEAL");
+      if (hit?.timestamp) out.set(r.id, hit.timestamp);
+    }
+    await sleep(260);
+  }
+  return out;
+}
+
 function paidFrom(
   contact: Record<string, string | null>,
   deal: HsRecord | undefined,
+  invoicePaidAt?: string,
 ): Client["paid"] {
   const d = deal?.properties;
   const won = d?.hs_is_closed_won === "true" || d?.dealstage === "closedwon";
@@ -208,7 +230,13 @@ function paidFrom(
   // "Appointment Scheduled" and none are won, while 42 contacts are marked
   // Invoice Paid. That label is the portal's real "money committed" signal.
   if (contact.hs_lead_status === "OPEN_DEAL") {
-    return { via: "lead_status_invoice_paid" };
+    const amount = Number(d?.amount);
+    if (Number.isFinite(amount) && amount > 0) {
+      return { via: "lead_status_invoice_paid", at: invoicePaidAt, amountCents: Math.round(amount * 100) };
+    }
+    const range = deal ? rangeFromDealName(deal.properties.dealname ?? "") : {};
+    const mid = range.lowCents && range.highCents ? Math.round((range.lowCents + range.highCents) / 2) : undefined;
+    return { via: "lead_status_invoice_paid", at: invoicePaidAt, amountCents: mid, estimated: Boolean(mid) };
   }
   return undefined;
 }
@@ -242,7 +270,7 @@ export type CrmSnapshot = {
  * of a dashboard reporting zero contacts. The caller treats a throw as "leave
  * the last good snapshot alone".
  */
-const cachedFetch = unstable_cache(fetchCrmUncached, ["hubspot-crm-snapshot-v3"], {
+const cachedFetch = unstable_cache(fetchCrmUncached, ["hubspot-crm-snapshot-v4"], {
   revalidate: 300,
   tags: ["crm"],
 });
@@ -258,6 +286,7 @@ async function fetchCrmUncached(): Promise<CrmSnapshot> {
   if (!contacts.length) throw new Error("HubSpot returned no contacts — token or rate limit.");
   const deals = await searchAll("deals", DEAL_PROPS, 1000);
   const labels = await leadStatusLabels();
+  const paidDates = await invoicePaidDates(contacts.filter((c) => c.properties.hs_lead_status === "OPEN_DEAL").map((c) => c.id));
 
   const dealByContact = new Map<string, HsRecord>();
   const assoc = await dealContactIds(deals.map((d) => d.id));
@@ -296,7 +325,7 @@ async function fetchCrmUncached(): Promise<CrmSnapshot> {
       crmStatusLabel: p.hs_lead_status ? (labels[p.hs_lead_status] ?? p.hs_lead_status) : undefined,
       hubspotDealId: dealForContact?.id,
       hubspotDealStage: dealForContact?.properties.dealstage ?? undefined,
-      paid: paidFrom(p, dealForContact),
+      paid: paidFrom(p, dealForContact, paidDates.get(c.id)),
     });
 
     // A street line alone is enough to be worth measuring. City/zip are sparser

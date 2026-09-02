@@ -17,17 +17,20 @@ export function PortalApproval({
   token,
   quoteId,
   consentText,
+  smsConsentText,
   acknowledgment,
   suggestedName,
 }: {
   token: string;
   quoteId: string;
   consentText: string;
+  smsConsentText: string;
   acknowledgment: string;
   suggestedName: string;
 }) {
   const [name, setName] = useState(suggestedName);
   const [consented, setConsented] = useState(false);
+  const [textsOk, setTextsOk] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -56,6 +59,17 @@ export function PortalApproval({
         <span className="text-xs leading-relaxed text-ink-dim">{consentText}</span>
       </label>
 
+      <label className="mt-3 flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={textsOk}
+          disabled={pending}
+          onChange={(e) => setTextsOk(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 accent-teal"
+        />
+        <span className="text-xs leading-relaxed text-ink-dim">{smsConsentText} <span className="text-ink-faint">Optional.</span></span>
+      </label>
+
       <div className="mt-5">
         <span className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-ink-faint">
           Type your full name
@@ -75,7 +89,7 @@ export function PortalApproval({
         className="mt-4 w-full rounded-xl bg-teal py-3.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
         onClick={() =>
           startTransition(async () => {
-            const res = await approveFromPortal(token, quoteId, name, consented);
+            const res = await approveFromPortal(token, quoteId, name, consented, textsOk);
             setResult(res);
             if (res.ok) router.refresh();
           })

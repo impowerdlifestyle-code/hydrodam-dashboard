@@ -67,6 +67,8 @@ export type Client = {
     via: "closed_won_deal" | "lifecycle_customer" | "lead_status_invoice_paid";
     at?: string;
     amountCents?: number;
+    /** True when the amount is the midpoint of the website calculator's range, not an invoice. */
+    estimated?: boolean;
   };
   /** Seeded demo row. Hidden from Clients/Requests once the CRM is connected. */
   demo?: boolean;

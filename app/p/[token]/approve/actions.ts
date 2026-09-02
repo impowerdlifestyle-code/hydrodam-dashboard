@@ -2,7 +2,8 @@
 
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
-import { AGREEMENT_VERSION, ESIGN_CONSENT } from "@/lib/agreement";
+import { AGREEMENT_VERSION, ESIGN_CONSENT, SMS_CONSENT } from "@/lib/agreement";
+import { toE164 } from "@/lib/telnyx";
 import { DB_LIVE, ensureData, getClient, getQuote, invalidate, isApprovable } from "@/lib/db";
 import { syncTransition } from "@/lib/crm-sync";
 import { resolvePortalToken } from "@/lib/portal";
@@ -25,7 +26,8 @@ export async function approveFromPortal(
   token: string,
   quoteId: string,
   signerName: string,
-  consented: boolean
+  consented: boolean,
+  textsOk = false
 ): Promise<{ ok: boolean; message: string }> {
   if (!DB_LIVE) return { ok: false, message: "Not available yet." };
 
@@ -68,6 +70,34 @@ export async function approveFromPortal(
     p_esign_consent: ESIGN_CONSENT,
   });
   invalidate();
+
+  // The signature page is the one place a paying customer reads and ticks a
+  // consent line themselves, so it is the cleanest SMS opt-in we can record.
+  const phone = getClient(link.clientId)?.phone;
+  if (textsOk && phone) {
+    try {
+      const [co] = await pg.select<{ company_id: string }>("clients", { select: "company_id", id: `eq.${link.clientId}`, limit: "1" });
+      if (co) {
+        await pg.insert(
+          "consents",
+          (["sms_transactional", "sms_marketing"] as const).map((channel) => ({
+            company_id: co.company_id,
+            client_id: link.clientId,
+            phone: toE164(phone),
+            channel,
+            action: "granted",
+            wording: SMS_CONSENT,
+            source: "portal_agreement",
+            source_url: "/p/approve",
+            ip_address: head.get("x-forwarded-for")?.split(",")[0]?.trim() || null,
+            user_agent: head.get("user-agent") ?? null,
+          }))
+        );
+      }
+    } catch (err) {
+      console.warn("[portal] consent record failed", err);
+    }
+  }
 
   // The customer signing is exactly the moment Mady's pipeline should move, and
   // it is the one status change no one in the office is present for.

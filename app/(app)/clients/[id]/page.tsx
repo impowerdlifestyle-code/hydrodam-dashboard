@@ -8,6 +8,9 @@ import { journeyFor } from "@/lib/journey";
 import { Stepper } from "@/components/ui";
 import { OpsButton, OpsGroup } from "@/components/Ops";
 import { OpeningForm, PropertyForm } from "@/components/OpsForms";
+import { RecordConsent } from "@/components/RecordConsent";
+import { DocumentUploader } from "@/components/DocumentUploader";
+import { DOC_KINDS, listDocuments } from "@/lib/documents";
 import { db, ensureData, getClient, invoicesFor, jobsFor, openingsFor, propertyFor, quotesFor } from "@/lib/db";
 import { money, phoneDisplay, shortDate } from "@/lib/format";
 
@@ -20,6 +23,7 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const client = getClient(id);
   if (!client) notFound();
+  const documents = await listDocuments(client.id);
 
   const prop = propertyFor(client.id);
   const quotes = quotesFor(client.id);
@@ -91,6 +95,14 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
                 Revoke existing
               </OpsButton>
             </OpsGroup>
+          </Panel>
+
+          <Panel>
+            <SectionLabel>Documents on their portal</SectionLabel>
+            <p className="mb-3 text-xs leading-relaxed text-ink-dim">
+              The project plan, the itemized estimate, anything they should be able to open from their own link. The first PDF shows inline on their portal.
+            </p>
+            <DocumentUploader clientId={client.id} docs={documents} kindLabels={DOC_KINDS} />
           </Panel>
 
           <Panel>
@@ -250,6 +262,7 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
                 Automations that require consent will skip this client. Transactional messages still send.
               </p>
             )}
+            <RecordConsent clientId={client.id} hasPhone={Boolean(client.phone)} />
           </Panel>
 
           <Panel>

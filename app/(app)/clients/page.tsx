@@ -14,15 +14,16 @@ const PAGE_SIZE = 100;
 export default async function ClientsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; p?: string; addr?: string; paid?: string }>;
+  searchParams: Promise<{ q?: string; p?: string; addr?: string; paid?: string; v?: string }>;
 }) {
   await ensureData();
   const { q = "", p = "1", addr, paid } = await searchParams;
+  const view = (await searchParams).v ?? (paid === "1" ? "customers" : "all");
   const crm = crmStatus();
 
   const needle = q.trim().toLowerCase();
   const matched = liveClients()
-    .filter((c) => (paid === "1" ? Boolean(c.paid) : true))
+    .filter((c) => (view === "customers" ? Boolean(c.paid) : view === "prospects" ? !c.paid : true))
     .filter((c) => (addr === "1" ? Boolean(propertyFor(c.id)) : true))
     .filter((c) => (needle ? `${c.name} ${c.email ?? ""} ${c.phone ?? ""}`.toLowerCase().includes(needle) : true))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -35,7 +36,12 @@ export default async function ClientsPage({
     open: invoicesFor(c.id).reduce((s, i) => s + (i.totalCents - i.amountPaidCents), 0),
   }));
   const qs = (next: Record<string, string>) =>
-    `/clients?${new URLSearchParams({ ...(q ? { q } : {}), ...(addr ? { addr } : {}), ...(paid ? { paid } : {}), ...next }).toString()}`;
+    `/clients?${new URLSearchParams({ ...(q ? { q } : {}), ...(addr ? { addr } : {}), ...(view !== "all" ? { v: view } : {}), ...next }).toString()}`;
+  const VIEWS = [
+    { key: "customers", label: "Customers", sub: "paid" },
+    { key: "prospects", label: "Prospects", sub: "not yet paid" },
+    { key: "all", label: "Everyone", sub: "" },
+  ];
 
   const paidRoster = paidClients().sort((a, b) => (b.paid?.at ?? "").localeCompare(a.paid?.at ?? ""));
   const paidTotal = paidRoster.reduce((s, c) => s + (c.paid?.amountCents ?? 0), 0);
@@ -55,14 +61,29 @@ export default async function ClientsPage({
         action={crm.live ? <RefreshCrm /> : undefined}
       />
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Contacts" value={matched.length.toLocaleString()} sub={`${addressed.toLocaleString()} with an address on file`} />
+      <nav className="mt-6 flex flex-wrap items-center gap-2">
+        {VIEWS.map((x) => (
+          <Link
+            key={x.key}
+            href={x.key === "all" ? "/clients" : `/clients?v=${x.key}`}
+            className={`rounded-full px-3.5 py-1.5 font-mono text-[11px] uppercase tracking-wider transition-colors ${
+              x.key === view ? "bg-teal/15 text-teal ring-1 ring-line-bright" : "text-ink-faint hover:bg-white/5 hover:text-ink"
+            }`}
+          >
+            {x.label}
+          </Link>
+        ))}
+        <span className="text-xs text-ink-faint">Customers have paid an invoice. Prospects are everyone still in the pipeline.</span>
+      </nav>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <StatCard label={view === "customers" ? "Customers" : view === "prospects" ? "Prospects" : "Contacts"} value={matched.length.toLocaleString()} sub={`${addressed.toLocaleString()} with an address on file`} />
         <StatCard
           label="Paid clients"
           value={paidRoster.length.toLocaleString()}
           sub={
             paidRoster.length
-              ? `${compactMoney(paidTotal)} from closed-won deals`
+              ? `${compactMoney(paidTotal)} paid, website ranges where no invoice amount exists`
               : crm.live
                 ? "nothing in HubSpot is marked won or customer yet"
                 : undefined
@@ -77,7 +98,7 @@ export default async function ClientsPage({
         />
       </div>
 
-      <section className="mt-8">
+      {view === "customers" && <section className="mt-8">
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="font-mono text-[11px] uppercase tracking-wider text-ink-faint">
             Paid clients
@@ -120,11 +141,11 @@ export default async function ClientsPage({
                       </Td>
                       <Td className="text-xs">{prop?.city ?? "—"}</Td>
                       <Td className="text-xs">
-                        {c.paid?.via === "closed_won_deal" ? "Closed-won deal" : "Customer stage"}
+                        {c.paid?.via === "closed_won_deal" ? "Closed-won deal" : c.paid?.via === "lead_status_invoice_paid" ? "Invoice Paid" : "Customer stage"}
                       </Td>
                       <Td className="text-xs">{c.paid?.at ? relative(c.paid.at) : "—"}</Td>
                       <Td align="right" className="font-mono text-sm tabular-nums text-ink">
-                        {c.paid?.amountCents ? money(c.paid.amountCents) : "—"}
+                        {c.paid?.amountCents ? <>{money(c.paid.amountCents)}{c.paid.estimated && <span className="ml-1 text-[10px] text-ink-faint" title="Midpoint of the website calculator range">~</span>}</> : "—"}
                       </Td>
                     </tr>
                   );
@@ -133,19 +154,11 @@ export default async function ClientsPage({
             </Table>
           )}
         </Panel>
-      </section>
+      </section>}
 
       <nav className="my-6 flex flex-wrap items-center gap-2">
         <Link
-          href={paid === "1" ? qs({}).replace(/[?&]paid=1/, "") : "/clients?paid=1"}
-          className={`rounded-full px-3.5 py-1.5 font-mono text-[11px] uppercase tracking-wider transition-colors ${
-            paid === "1" ? "bg-good/15 text-good ring-1 ring-line-bright" : "text-ink-faint hover:bg-white/5 hover:text-ink"
-          }`}
-        >
-          Paid only
-        </Link>
-        <Link
-          href={addr === "1" ? "/clients" : "/clients?addr=1"}
+          href={addr === "1" ? qs({}).replace(/[?&]addr=1/, "") : qs({ addr: "1" })}
           className={`rounded-full px-3.5 py-1.5 font-mono text-[11px] uppercase tracking-wider transition-colors ${
             addr === "1" ? "bg-teal/15 text-teal ring-1 ring-line-bright" : "text-ink-faint hover:bg-white/5 hover:text-ink"
           }`}

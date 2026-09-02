@@ -405,6 +405,10 @@ export type Metrics = {
   avgTicketCents: number;
   activeJobs: number;
   slowResponses: number;
+  /** HubSpot contacts that reached Invoice Paid this month, and what that was worth. */
+  paidThisMonth: number;
+  paidThisMonthCents: number;
+  paidThisMonthEstimated: boolean;
 };
 
 export function metrics(): Metrics {
@@ -425,10 +429,16 @@ export function metrics(): Metrics {
     return Date.parse(r.firstResponseAt) - Date.parse(r.createdAt) > 5 * 60_000;
   }).length;
 
+  const paidMonth = d.clients.filter((c) => c.paid?.at && c.paid.at >= monthStart);
+  const paidMonthCents = paidMonth.reduce((s, c) => s + (c.paid?.amountCents ?? 0), 0);
+
   return {
     openPipelineCents: openQuotes.reduce((s, q) => s + q.totalCents, 0),
     openQuoteCount: openQuotes.length,
-    wonThisMonthCents: won.filter((q) => (q.approvedAt ?? "") >= monthStart).reduce((s, q) => s + q.totalCents, 0),
+    wonThisMonthCents: won.filter((q) => (q.approvedAt ?? "") >= monthStart).reduce((s, q) => s + q.totalCents, 0) + paidMonthCents,
+    paidThisMonth: paidMonth.length,
+    paidThisMonthCents: paidMonthCents,
+    paidThisMonthEstimated: paidMonth.some((c) => c.paid?.estimated),
     collectedThisMonthCents: d.payments
       .filter((p) => p.status === "succeeded" && p.receivedOn >= monthStart.slice(0, 10))
       .reduce((s, p) => s + p.amountCents, 0),

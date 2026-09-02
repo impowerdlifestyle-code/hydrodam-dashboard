@@ -6,6 +6,8 @@ import {
   getClient, invoicesFor, isApprovable, jobsFor, nextVisitFor, portalQuote, propertyFor,
 } from "@/lib/db";
 import { journeyFor } from "@/lib/journey";
+import { DOC_KINDS, listDocuments } from "@/lib/documents";
+import { db } from "@/lib/db";
 import { longDate, money, shortDate, timeRange } from "@/lib/format";
 
 /**
@@ -18,15 +20,25 @@ import { longDate, money, shortDate, timeRange } from "@/lib/format";
  * supplies the credential-bearing hrefs: /p/:token passes them, the internal
  * preview passes nothing and the CTAs render as inert labels.
  */
-export function PortalView({
+export async function PortalView({
   clientId,
   approveHref,
+  docHref,
 }: {
   clientId: string;
   approveHref?: string;
+  /** Builds the credential-bearing link for a file. Absent in the office preview, so files list but do not open. */
+  docHref?: (docId: string) => string;
 }) {
   const client = getClient(clientId);
   if (!client) return null;
+
+  const docs = await listDocuments(clientId, { clientVisibleOnly: true });
+  const firstPdf = docHref ? docs.find((d) => d.mime === "application/pdf") : undefined;
+  // What they priced on the website before anyone measured. Newest wins.
+  const webEstimate = db().requests
+    .filter((r) => r.clientId === clientId && r.estimateLowCents)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 
   const prop = propertyFor(clientId);
   const jobs = jobsFor(clientId);
@@ -72,6 +84,52 @@ export function PortalView({
           <p className="mt-3 text-xs text-ink-faint">
             We&apos;ll text you when the crew is on the way. Need to move it? Reply to any of our messages and we&apos;ll sort it.
           </p>
+        </section>
+      )}
+
+      {!quote && webEstimate && (
+        <section className="panel mt-4 rounded-2xl p-5">
+          <p className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">Your online estimate</p>
+          <p className="mt-1.5 font-display text-2xl font-bold text-teal">{money(webEstimate.estimateLowCents!)} – {money(webEstimate.estimateHighCents ?? 0)}</p>
+          <p className="mt-1 text-sm text-ink-dim">{webEstimate.title}</p>
+          <p className="mt-3 text-xs leading-relaxed text-ink-faint">
+            This is the range you priced on thehydrodam.com on {shortDate(webEstimate.createdAt)}. Once we measure your openings you get an itemized estimate here, with every door and panel listed.
+          </p>
+        </section>
+      )}
+
+      {docs.length > 0 && (
+        <section className="panel mt-4 rounded-2xl p-5">
+          <p className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">Your documents</p>
+          {firstPdf && (
+            <div className="mt-3 overflow-hidden rounded-xl border border-line bg-black/30">
+              <iframe src={docHref!(firstPdf.id)} title={firstPdf.title} className="h-[70vh] w-full" />
+            </div>
+          )}
+          <ul className="mt-3 flex flex-col gap-1.5">
+            {docs.map((d) => (
+              <li key={d.id}>
+                {docHref ? (
+                  <a href={docHref(d.id)} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-xl border border-line/60 p-3 transition-colors hover:border-line-bright">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal/15 text-teal"><Icon name={d.mime.startsWith("image/") ? "camera" : "file"} size={15} /></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-ink">{d.title}</span>
+                      <span className="block text-xs text-ink-faint">{DOC_KINDS[d.kind] ?? "Document"} · {shortDate(d.created_at)}</span>
+                    </span>
+                    <Icon name="external" size={14} className="shrink-0 text-ink-faint" />
+                  </a>
+                ) : (
+                  <span className="flex items-center gap-3 rounded-xl border border-line/60 p-3 opacity-80">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal/15 text-teal"><Icon name="file" size={15} /></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-ink">{d.title}</span>
+                      <span className="block text-xs text-ink-faint">{DOC_KINDS[d.kind] ?? "Document"} · {shortDate(d.created_at)} · opens on the customer's own link</span>
+                    </span>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 
