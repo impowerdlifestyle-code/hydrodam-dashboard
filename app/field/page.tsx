@@ -3,6 +3,8 @@ import { Icon } from "@/components/Icon";
 import { Avatar, EmptyState, StatusPill } from "@/components/ui";
 import { clientName, getStaff, propertyFor, todaysVisits, ensureData } from "@/lib/db";
 import { timeRange } from "@/lib/format";
+import { listItems, type ChecklistSpec } from "@/lib/builder";
+import { ChecklistCard } from "@/components/ChecklistCard";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +16,7 @@ const KIND_LABEL: Record<string, string> = {
 export default async function FieldToday() {
   await ensureData();
   const visits = todaysVisits().filter((v) => v.assignedTo.length > 0);
+  const checklists = (await listItems<ChecklistSpec>("checklist")).filter((c) => c.spec.audience === "crew");
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 
   return (
@@ -63,6 +66,15 @@ export default async function FieldToday() {
           })
         )}
       </div>
+
+      {checklists.length > 0 && (
+        <div className="mt-8">
+          <p className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">Checklists</p>
+          <div className="mt-2 flex flex-col gap-3">
+            {checklists.map((c) => <ChecklistCard key={c.id} name={c.name} spec={c.spec} />)}
+          </div>
+        </div>
+      )}
     </>
   );
 }

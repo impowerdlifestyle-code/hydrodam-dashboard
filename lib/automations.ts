@@ -2,7 +2,8 @@ import "server-only";
 import * as pg from "@/lib/supabase";
 import { SUPABASE_LIVE } from "@/lib/supabase";
 import { MAIL_LIVE, sendEmail } from "@/lib/mail";
-import { render } from "@/lib/templates";
+import { render, renderCustom } from "@/lib/templates";
+import { customAutomationTemplates } from "@/lib/builder";
 import { TELNYX_LIVE, sendSms, segmentsFor, toE164 } from "@/lib/telnyx";
 
 /**
@@ -140,7 +141,21 @@ async function candidatesFor(cfg: ConfigRow, epoch: string): Promise<Candidate[]
     }
   };
 
-  switch (cfg.automation_id) {
+  switch (ruleFor(cfg)) {
+    case "requests_created": {
+      const rows = await pg.select<{ id: string; number: number; created_at: string; clients: ClientRow | null }>("requests", {
+        select: `id,number,created_at,clients(${CLIENT_COLS})`,
+        status: "not.in.(converted,unqualified)",
+        created_at: `gte.${epoch}`,
+        order: "created_at.desc",
+        limit: "500",
+      });
+      for (const r of rows) {
+        push(r.clients, r.created_at, { requestId: r.id }, {}, `request #${r.number}`, `request:${r.id}`);
+      }
+      break;
+    }
+
     case "speed_to_lead": {
       const rows = await pg.select<{
         id: string; number: number; created_at: string; first_response_at: string | null;
@@ -291,6 +306,25 @@ async function candidatesFor(cfg: ConfigRow, epoch: string): Promise<Candidate[]
   return out;
 }
 
+/**
+ * The seeded automations have hand-written rules keyed by id. Anything the
+ * team builds in the dashboard has a fresh id, so it borrows the rule for its
+ * trigger instead, and the message comes from its own spec.
+ */
+const RULE_BY_TRIGGER: Record<string, string> = {
+  "request.created": "requests_created",
+  "visit.scheduled": "reminder_24h",
+  "quote.sent": "quote_followup",
+  "invoice.sent": "invoice_reminders",
+  "job.closed": "review_request",
+  "lead.status_changed": "dormant_nurture",
+};
+const SEEDED = new Set(["speed_to_lead", "reminder_24h", "quote_followup", "invoice_reminders", "review_request", "dormant_nurture"]);
+
+function ruleFor(cfg: ConfigRow): string {
+  return SEEDED.has(cfg.automation_id) ? cfg.automation_id : (RULE_BY_TRIGGER[cfg.trigger_event] ?? cfg.automation_id);
+}
+
 function windowLabel(startISO: string, endISO: string | null): string {
   const fmt = (iso: string) =>
     new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" }).format(new Date(iso));
@@ -318,6 +352,7 @@ export async function runAutomations(opts: RunOptions = {}): Promise<RunSummary[
   const today = todayInTz();
   const nowMinutes = minutesNowInTz();
   const summaries: RunSummary[] = [];
+  const custom = await customAutomationTemplates();
 
   for (const cfg of configs) {
     if (opts.only && cfg.automation_id !== opts.only) continue;
@@ -384,12 +419,9 @@ export async function runAutomations(opts: RunOptions = {}): Promise<RunSummary[
           continue;
         }
 
-        const rendered = render(cfg.automation_id, {
-          firstName: firstNameOf(cand.client),
-          companyPhone: "(727) 613-1415",
-          ...cand.context,
-        });
-        if (!rendered) {
+        const ctx = { firstName: firstNameOf(cand.client), companyPhone: "(727) 613-1415", ...cand.context };
+        const rendered = render(cfg.automation_id, ctx) ?? renderCustom(custom[cfg.automation_id], ctx);
+        if (!rendered || (channel.channel === "sms" ? !rendered.sms : !rendered.html)) {
           note("no_template");
           summary.suppressed += 1;
           continue;

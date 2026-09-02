@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge, PageHeader, Panel, SectionLabel } from "@/components/ui";
 import { ReplyComposer } from "@/components/ReplyComposer";
+import { messageTemplates } from "@/lib/builder";
 import { clientOn, getConversation, markRead, messagesIn } from "@/lib/comms";
 import { propertyFor, smsGate, ensureData } from "@/lib/db";
 import { dateTime, phoneDisplay, relative } from "@/lib/format";
@@ -71,6 +72,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ id: str
             conversationId={conv.id}
             blocked={blocked}
             firstName={(client?.name ?? "").split(" ")[0] || "there"}
+            templates={(await messageTemplates()).filter((t) => t.channel === "sms").map(({ key, name, body }) => ({ key, name, body }))}
           />
         </Panel>
 

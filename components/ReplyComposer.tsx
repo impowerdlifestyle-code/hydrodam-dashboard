@@ -4,10 +4,8 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/Icon";
 import { buttonClass } from "@/components/ui";
-import { MESSAGE_TEMPLATES } from "@/lib/data";
 import { sendReplyAction } from "@/app/(app)/inbox/[id]/actions";
 
-const SMS_TEMPLATES = MESSAGE_TEMPLATES.filter((t) => t.channel === "sms");
 
 /** Mirrors lib/telnyx.ts so the counter matches what Telnyx will actually bill. */
 function segments(text: string) {
@@ -21,10 +19,12 @@ export function ReplyComposer({
   conversationId,
   blocked,
   firstName,
+  templates = [],
 }: {
   conversationId: string;
   blocked?: string;
   firstName: string;
+  templates?: { key: string; name: string; body: string }[];
 }) {
   const [body, setBody] = useState("");
   const [pending, startTransition] = useTransition();
@@ -68,7 +68,7 @@ export function ReplyComposer({
       />
 
       <div className="mt-2 flex flex-wrap gap-1.5">
-        {SMS_TEMPLATES.map((t) => (
+        {templates.map((t) => (
           <button
             key={t.key}
             type="button"

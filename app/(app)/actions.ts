@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { AGREEMENT_VERSION, ESIGN_CONSENT } from "@/lib/agreement";
 import {
-  DB_LIVE, addTeammate, approveQuote, clockIn, clockOut, convertQuoteToJob, createInvoice,
+  DB_LIVE, db, addTeammate, approveQuote, clockIn, clockOut, convertQuoteToJob, createInvoice,
   addOpening, createQuote, createVisit, ensureData, getJob, getQuote, getRequest, getVisit,
   moveVisit, openingsFor, realClientId, realRequestId, recordPayment, removeOpening, saveChecklist,
   saveProperty, getClient, existingClientId,
@@ -149,6 +149,11 @@ async function portalOrigin(): Promise<string> {
   return "https://hydrodam-dashboard.vercel.app";
 }
 
+/** The HubSpot contact behind any request, job or invoice, if it came from the CRM. */
+function contactFor(clientId: string | undefined): string | undefined {
+  return clientId ? getClient(clientId)?.hubspotContactId : undefined;
+}
+
 async function pushQuoteStage(
   quoteId: string,
   from: string | undefined,
@@ -173,14 +178,22 @@ async function dispatch(input: OpsInput): Promise<OpsResult> {
     // ------------------------------------------------------------ requests
 
     case "request.status": {
+      const before = getRequest(input.id);
       const { requestId } = await realRequestId(input.id);
       // The first time anyone moves a lead off `new`, that IS the first
       // response. The Requests screen reports speed to lead off this.
       const patch: Parameters<typeof updateRequest>[1] = { status: input.status };
-      if (!getRequest(input.id)?.firstResponseAt && input.status !== "new") {
+      if (!before?.firstResponseAt && input.status !== "new") {
         patch.firstResponseAt = new Date().toISOString();
       }
       await updateRequest(requestId, patch);
+      // The journey the customer sees in the portal is the same one Mady sees
+      // as a deal stage. status_transitions names the HubSpot move per step.
+      if (before && before.status !== input.status) {
+        await syncTransition({ entity: "request", from: before.status, to: input.status }, contactFor(before.clientId), {
+          note: input.status === "assessed" ? "Assessment completed. Marked in HydroDam Ops." : undefined,
+        });
+      }
       return { ok: true, message: `Moved to ${input.status.replace(/_/g, " ")}.` };
     }
 
@@ -192,6 +205,7 @@ async function dispatch(input: OpsInput): Promise<OpsResult> {
 
     case "request.schedule": {
       if (!DB_LIVE) return { ok: false, message: NEEDS_DB };
+      const before = getRequest(input.id);
       const { requestId } = await realRequestId(input.id);
       await createVisit({
         requestId,
@@ -201,6 +215,9 @@ async function dispatch(input: OpsInput): Promise<OpsResult> {
         minutes: input.minutes,
         staffIds: input.staffIds,
       });
+      if (before && before.status !== "assessment_scheduled") {
+        await syncTransition({ entity: "request", from: before.status, to: "assessment_scheduled" }, contactFor(before.clientId));
+      }
       return { ok: true, message: "Assessment booked." };
     }
 
@@ -266,9 +283,16 @@ async function dispatch(input: OpsInput): Promise<OpsResult> {
 
     // ---------------------------------------------------------------- jobs
 
-    case "job.status":
+    case "job.status": {
+      const before = getJob(input.id);
       await updateJob(input.id, { status: input.status });
+      if (before && before.status !== input.status) {
+        await syncTransition({ entity: "job", from: before.status, to: input.status }, contactFor(before.clientId), {
+          note: input.status === "completed" ? `Installation complete on job #${before.number}. Marked in HydroDam Ops.` : undefined,
+        });
+      }
       return { ok: true, message: `Job is ${input.status.replace(/_/g, " ")}.` };
+    }
 
     case "job.fabrication":
       await updateJob(input.id, { fabricationStatus: input.stage as never });
@@ -326,7 +350,14 @@ async function dispatch(input: OpsInput): Promise<OpsResult> {
 
     case "invoice.pay": {
       if (input.amountCents <= 0) return { ok: false, message: "Enter an amount." };
+      const before = db().invoices.find((i) => i.id === input.id);
       await recordPayment(input.id, input.amountCents, input.method, input.reference);
+      const after = db().invoices.find((i) => i.id === input.id);
+      if (before && after && before.status !== after.status) {
+        await syncTransition({ entity: "invoice", from: before.status, to: after.status }, contactFor(before.clientId), {
+          note: `Payment of $${(input.amountCents / 100).toFixed(2)} by ${input.method} on invoice #${before.number}. Recorded in HydroDam Ops.`,
+        });
+      }
       return {
         ok: true,
         message:

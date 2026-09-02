@@ -2,6 +2,9 @@ import { Avatar, Badge, PageHeader, Panel, ProgressBar, SectionLabel, StatCard, 
 import { OpsButton } from "@/components/Ops";
 import { AddTeammateForm } from "@/components/OpsForms";
 import { crewUtilization, db, getStaff, ensureData } from "@/lib/db";
+import { listItems, type ChecklistSpec } from "@/lib/builder";
+import { ChecklistCard } from "@/components/ChecklistCard";
+import Link from "next/link";
 import { hoursMinutes, money, phoneDisplay, relative } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +19,7 @@ export default async function TeamPage() {
   const totalMinutes = util.reduce((s, u) => s + u.minutes, 0);
   const totalCost = util.reduce((s, u) => s + u.costCents, 0);
   const running = d.timeEntries.filter((t) => !t.endedAt);
+  const checklists = await listItems<ChecklistSpec>("checklist");
 
   return (
     <>
@@ -137,6 +141,19 @@ export default async function TeamPage() {
           </ul>
         </Panel>
       </div>
+
+      <Panel className="mt-6">
+        <SectionLabel action={<Link href="/builder" className="font-mono text-[11px] uppercase tracking-wider text-teal hover:underline">Build one</Link>}>
+          Checklists and SOPs
+        </SectionLabel>
+        {checklists.length === 0 ? (
+          <p className="text-sm text-ink-dim">Nothing built yet. Ask the Builder for a morning checklist, an install QA list or an office SOP.</p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {checklists.map((c) => <ChecklistCard key={c.id} name={c.name} spec={c.spec} />)}
+          </div>
+        )}
+      </Panel>
     </>
   );
 }

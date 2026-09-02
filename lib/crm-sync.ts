@@ -75,7 +75,9 @@ export async function syncTransition(
   }
 
   const stageEffect = effects.find((e) => e.startsWith("hubspot.deal."));
-  const wantsNote = effects.includes("hubspot.note.agreement");
+  // Every hubspot.note.* effect means "tell the CRM what just happened"; the
+  // suffix only names which event, and the caller supplies the wording.
+  const wantsNote = effects.some((e) => e.startsWith("hubspot.note."));
   if (!stageEffect && !wantsNote) return;
 
   try {

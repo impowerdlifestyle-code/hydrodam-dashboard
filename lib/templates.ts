@@ -159,3 +159,41 @@ export function render(automationId: string, ctx: TemplateContext): Rendered | n
   const build = TEMPLATES[automationId];
   return build ? build(ctx) : null;
 }
+
+/** Tokens the Build Agent may use in a message it writes. */
+export const TOKENS = [
+  "first_name", "company_phone", "quote_number", "quote_total", "invoice_number", "balance",
+  "due_date", "visit_window", "address", "days_overdue", "portal_url",
+] as const;
+
+export function fill(text: string, c: TemplateContext): string {
+  const values: Record<string, string> = {
+    first_name: c.firstName,
+    company_phone: c.companyPhone,
+    quote_number: c.quoteNumber ? String(c.quoteNumber) : "",
+    quote_total: c.quoteTotalCents ? money(c.quoteTotalCents, true) : "",
+    invoice_number: c.invoiceNumber ? String(c.invoiceNumber) : "",
+    balance: c.balanceCents ? money(c.balanceCents, true) : "",
+    due_date: c.dueDate ?? "",
+    visit_window: c.visitWindow ?? "",
+    address: c.address ?? "",
+    days_overdue: c.daysOverdue != null ? String(c.daysOverdue) : "",
+    portal_url: c.portalUrl ?? "",
+  };
+  return text.replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (_, k: string) => values[k.toLowerCase()] ?? "").replace(/[ ]{2,}/g, " ").trim();
+}
+
+/** An automation the team built in the dashboard: plain text with tokens, no code. */
+export function renderCustom(
+  spec: { sms?: string; email_subject?: string; email_body?: string } | undefined,
+  ctx: TemplateContext
+): Rendered | null {
+  if (!spec) return null;
+  const subject = spec.email_subject ? fill(spec.email_subject, ctx) : "";
+  const body = spec.email_body ? fill(spec.email_body, ctx) : "";
+  return {
+    subject,
+    html: body ? shell({ heading: subject, body: sign(body.split(/\n{2,}/).map((para) => p(para.replace(/\n/g, "<br>"))).join("")) }) : "",
+    sms: spec.sms ? fill(spec.sms, ctx) : "",
+  };
+}

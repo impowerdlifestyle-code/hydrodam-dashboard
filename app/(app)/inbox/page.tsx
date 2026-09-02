@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Badge, EmptyState, PageHeader, Panel, SectionLabel, StatCard } from "@/components/ui";
 import { Icon } from "@/components/Icon";
-import { MESSAGE_TEMPLATES } from "@/lib/data";
+import { messageTemplates } from "@/lib/builder";
 import { inboxThreads } from "@/lib/comms";
 import { phoneDisplay, relative } from "@/lib/format";
 import { telnyxStatus } from "@/lib/telnyx";
@@ -13,6 +13,7 @@ export const metadata = { title: "Inbox · HydroDam Ops" };
 export default async function InboxPage() {
   await ensureData();
   const threads = await inboxThreads();
+  const templates = await messageTemplates();
   const unread = threads.reduce((s, t) => s + t.conversation.unreadCount, 0);
   const outbound30 = threads.filter((t) => t.last?.direction === "outbound").length;
 
@@ -82,11 +83,11 @@ export default async function InboxPage() {
         <Panel>
           <SectionLabel>Templates</SectionLabel>
           <ul className="flex flex-col gap-2">
-            {MESSAGE_TEMPLATES.map((t) => (
+            {templates.map((t) => (
               <li key={t.key} className="rounded-xl border border-line/60 p-3">
                 <p className="flex items-center justify-between gap-2 text-sm font-semibold text-ink">
                   {t.name}
-                  <Badge tone={t.channel === "sms" ? "teal" : "neutral"}>{t.channel}</Badge>
+                  <span className="flex gap-1">{t.custom && <Badge tone="good">built here</Badge>}<Badge tone={t.channel === "sms" ? "teal" : "neutral"}>{t.channel}</Badge></span>
                 </p>
                 <p className="mt-1.5 text-xs leading-relaxed text-ink-faint">{t.body}</p>
               </li>
