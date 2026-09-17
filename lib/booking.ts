@@ -7,6 +7,7 @@ import { syncTransition } from "@/lib/crm-sync";
 import { addDaysKey, dayKey, formatKey, longDate, startOfWeekKey, timeRange, todayKey, weekdayOfKey } from "@/lib/format";
 import { esc, p, sendEmail, shell, teamRecipients } from "@/lib/mail";
 import { portalOrigin } from "@/lib/portal";
+import { textClient } from "@/lib/comms";
 import * as pg from "@/lib/supabase";
 import type { Visit } from "@/lib/types";
 
@@ -30,12 +31,31 @@ const ACTIVE_VISIT = new Set<Visit["status"]>(["scheduled", "confirmed", "en_rou
 export type Slot = { startISO: string; label: string };
 export type SlotDay = { key: string; label: string; slots: Slot[] };
 
-/** The people who go out to measure: office staff, or the owner if there are none. */
+/**
+ * The people who can take an assessment: office staff first, then the owner.
+ * Availability used to hang on Emma alone, so one busy afternoon of hers
+ * emptied the customer's picker while Mady was free.
+ */
 export function assessorIds(): string[] {
   const staff = db().staff.filter((s) => s.active);
-  const office = staff.filter((s) => s.role === "office").map((s) => s.id);
-  if (office.length) return office;
-  return staff.filter((s) => s.role === "owner").map((s) => s.id);
+  return [
+    ...staff.filter((s) => s.role === "office"),
+    ...staff.filter((s) => s.role === "owner"),
+  ].map((s) => s.id);
+}
+
+function busyVisits(assessors: string[]): Visit[] {
+  return db().visits.filter(
+    (v) => ACTIVE_VISIT.has(v.status) && v.scheduledStart && v.assignedTo.some((id) => assessors.includes(id))
+  );
+}
+
+/** The first assessor, in preference order, with nothing overlapping that slot. */
+function freeAssessor(startISO: string): string | undefined {
+  const assessors = assessorIds();
+  const busy = busyVisits(assessors);
+  const endISO = new Date(Date.parse(startISO) + ASSESSMENT_MINUTES * 60_000).toISOString();
+  return assessors.find((id) => !busy.some((v) => v.assignedTo.includes(id) && overlaps(v, startISO, endISO)));
 }
 
 /** The UTC instant of a wall-clock hour on a given day in HydroDam's timezone. */
@@ -63,9 +83,7 @@ function overlaps(v: Visit, startISO: string, endISO: string): boolean {
 
 export function availableSlots(): SlotDay[] {
   const assessors = assessorIds();
-  const busy = db().visits.filter(
-    (v) => ACTIVE_VISIT.has(v.status) && v.scheduledStart && v.assignedTo.some((id) => assessors.includes(id))
-  );
+  const busy = busyVisits(assessors);
   const earliest = new Date(Date.now() + LEAD_TIME_HOURS * 3_600_000).toISOString();
   const days: SlotDay[] = [];
 
@@ -131,7 +149,7 @@ export async function bookAssessment(
   }
 
   const request = await openRequestFor(realId, input.notes);
-  const staffId = assessorIds()[0];
+  const staffId = freeAssessor(input.startISO);
   const visitId = await createVisit({
     requestId: request.id,
     kind: "assessment",
@@ -229,10 +247,17 @@ async function notifyBooking(clientId: string, startISO: string, endISO: string,
       body:
         p(`<strong>${esc(client.name)}</strong> picked <strong>${esc(when)}</strong> from their portal.`) +
         p([address && `Address: ${esc(address)}`, client.phone && `Phone: ${esc(client.phone)}`, client.email && `Email: ${esc(client.email)}`, ip && `Booked from ${esc(ip)}`].filter(Boolean).join("<br>")) +
-        p("It is on the Schedule now, assigned to the office. The 24-hour reminder goes out automatically."),
+        p("It is on the Schedule now. The 24-hour reminder goes out automatically."),
       cta: { label: "Open the schedule", href: scheduleHref(startISO) },
     }),
   });
+
+  if (client.phone) {
+    const text = `HydroDam: you're booked for ${when}${address ? ` at ${address}` : ""}. About an hour. Need to change it? (727) 613-1415`;
+    await textClient({ clientId, phone: client.phone, body: text, templateKey: "appointment_confirm" })
+      .then((r) => { if (!r.sent) console.info("[booking] confirmation text not sent:", r.reason); })
+      .catch((err) => console.warn("[booking] confirmation text failed", err));
+  }
 
   if (client.email) {
     await sendEmail({

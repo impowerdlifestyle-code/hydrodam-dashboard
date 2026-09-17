@@ -24,7 +24,7 @@ export const CRM_LIVE = Boolean(process.env.HUBSPOT_TOKEN);
 const CONTACT_PROPS = [
   "firstname", "lastname", "email", "phone", "mobilephone",
   "address", "city", "state", "zip",
-  "lifecyclestage", "createdate", "hs_lead_status", "notes_last_contacted",
+  "lifecyclestage", "createdate", "hs_lead_status", "notes_last_contacted", "notes_last_updated",
   "lead_source", "contact_form", "comments_or_questions",
 ] as const;
 
@@ -270,7 +270,7 @@ export type CrmSnapshot = {
  * of a dashboard reporting zero contacts. The caller treats a throw as "leave
  * the last good snapshot alone".
  */
-const cachedFetch = unstable_cache(fetchCrmUncached, ["hubspot-crm-snapshot-v4"], {
+const cachedFetch = unstable_cache(fetchCrmUncached, ["hubspot-crm-snapshot-v5"], {
   revalidate: 300,
   tags: ["crm"],
 });
@@ -360,6 +360,10 @@ async function fetchCrmUncached(): Promise<CrmSnapshot> {
       // HubSpot records LAST contacted, not first. The Requests page labels this
       // accordingly when the CRM is live — do not read it as speed-to-lead.
       firstResponseAt: p.notes_last_contacted ?? undefined,
+      // "Last activity date": any logged note, call, text or email. It is set on
+      // 85 of 86 estimate-pending leads where last contacted is set on 26,
+      // because Emma logs her follow-ups as notes.
+      lastTouchAt: [p.notes_last_updated, p.notes_last_contacted].filter(Boolean).sort().at(-1) ?? undefined,
     });
   }
 

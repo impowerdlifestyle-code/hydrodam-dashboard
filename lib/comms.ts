@@ -15,7 +15,7 @@ import {
   SMS_LEAD_SOURCE,
 } from "@/lib/db";
 import { phoneDisplay } from "@/lib/format";
-import { phoneKey, segmentsFor, toE164 } from "@/lib/telnyx";
+import { phoneKey, segmentsFor, sendSms, TELNYX_LIVE, toE164 } from "@/lib/telnyx";
 
 /**
  * The comms slice, durable when Postgres is configured.
@@ -453,4 +453,60 @@ export async function conversationIdForPhone(phone: string): Promise<string | un
     limit: "1",
   });
   return row?.id;
+}
+
+/**
+ * One transactional text to a customer, outside the automation engine: the
+ * acknowledgement when a lead arrives, the confirmation when they book.
+ *
+ * The gates are the engine's own, in the same order: a registered carrier
+ * route, a positive sms_transactional consent (absence of a yes is a no, and a
+ * STOP reads as a no), and quiet hours. Nothing is sent and nothing is recorded
+ * when any of them fails, and the reason comes back so the caller can log it.
+ */
+export async function textClient(opts: {
+  clientId: string;
+  phone: string;
+  body: string;
+  templateKey: string;
+}): Promise<{ sent: boolean; reason?: string }> {
+  if (!SUPABASE_LIVE) return { sent: false, reason: "no_db" };
+  if (!TELNYX_LIVE) return { sent: false, reason: "no_sms_key" };
+  if (process.env.SMS_CARRIER_READY !== "1") return { sent: false, reason: "no_10dlc_registration" };
+
+  const [consent] = await pg.select<{ granted: boolean }>("v_current_consent", {
+    select: "granted", client_id: `eq.${opts.clientId}`, channel: "eq.sms_transactional", limit: "1",
+  });
+  if (!consent?.granted) return { sent: false, reason: consent ? "opted_out" : "no_consent" };
+
+  const hour = Number(
+    new Intl.DateTimeFormat("en-GB", { timeZone: "America/New_York", hour: "2-digit", hour12: false }).format(new Date())
+  );
+  if (hour < 8 || hour >= 21) return { sent: false, reason: "quiet_hours" };
+
+  const to = toE164(opts.phone);
+  const result = await sendSms(to, opts.body);
+  if (!result.ok) return { sent: false, reason: result.error };
+
+  const [conversation] = await pg.insert<{ id: string }>(
+    "conversations",
+    {
+      company_id: await company(),
+      client_id: opts.clientId,
+      channel: "sms",
+      external_address: to,
+      last_message_at: new Date().toISOString(),
+      status: "open",
+    },
+    { onConflict: "company_id,channel,external_address" }
+  );
+  await recordOutbound({
+    conversationId: conversation.id,
+    clientId: opts.clientId,
+    to,
+    body: opts.body,
+    providerId: result.id,
+    templateKey: opts.templateKey,
+  });
+  return { sent: true };
 }

@@ -25,6 +25,25 @@ const PAGE_SIZE = 100;
 /** One line per person. The newest enquiry speaks for the group; the rest are counted. */
 type Group = { lead: ServiceRequest; count: number; ballpark?: ServiceRequest };
 
+/** Work the money first: estimate stage, then booked visits, then people already spoken to, then cold. */
+const STATUS_RANK: Record<string, number> = { assessed: 0, assessment_scheduled: 1, contacted: 2, new: 3, converted: 4, unqualified: 5 };
+const DAY = 86_400_000;
+
+/**
+ * The last time anyone was in touch: HubSpot's last activity date on a CRM
+ * lead, or the newest message on any thread with them, whichever is later.
+ */
+function lastTouch(r: ServiceRequest, threads: Map<string, string>): string | undefined {
+  return [r.lastTouchAt, r.firstResponseAt, threads.get(r.clientId)].filter(Boolean).sort().at(-1);
+}
+
+function touchTone(iso?: string): { label: string; className: string } {
+  if (!iso) return { label: "Never", className: "text-bad" };
+  const days = Math.floor((Date.now() - Date.parse(iso)) / DAY);
+  const label = days <= 0 ? "Today" : days === 1 ? "1 day ago" : `${days} days ago`;
+  return { label, className: days <= 2 ? "text-good" : days <= 6 ? "text-warn" : "text-bad" };
+}
+
 function groupByClient(rows: ServiceRequest[]): Group[] {
   const by = new Map<string, Group>();
   for (const r of rows) {
@@ -42,10 +61,10 @@ function groupByClient(rows: ServiceRequest[]): Group[] {
 export default async function RequestsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ f?: string; q?: string; p?: string; o?: string }>;
+  searchParams: Promise<{ f?: string; q?: string; p?: string; o?: string; s?: string }>;
 }) {
   await ensureData();
-  const { f = "open", q = "", p = "1", o = "" } = await searchParams;
+  const { f = "open", q = "", p = "1", o = "", s: sort = "priority" } = await searchParams;
   const filter = FILTERS.find((x) => x.key === f) ?? FILTERS[0];
   const crm = crmStatus();
   const me = await currentStaff();
@@ -58,13 +77,23 @@ export default async function RequestsPage({
     .filter((r) => (filter.match.length ? filter.match.includes(r.status) : true))
     .filter((r) => (ownerId ? r.assignedTo === ownerId : o === "none" ? !r.assignedTo : true))
     .filter((r) => (needle ? `${r.title} ${clientName(r.clientId)}`.toLowerCase().includes(needle) : true));
-  const groups = groupByClient(matched);
+  const threads = new Map<string, string>();
+  for (const c of db().conversations) {
+    if (c.lastMessageAt && c.lastMessageAt > (threads.get(c.clientId) ?? "")) threads.set(c.clientId, c.lastMessageAt);
+  }
+  const grouped = groupByClient(matched);
+  // Priority: by stage, then whoever has gone longest without a touch. Never touched sorts first.
+  const groups = sort === "newest" ? grouped : [...grouped].sort((a, b) => {
+    const rank = (STATUS_RANK[a.lead.status] ?? 9) - (STATUS_RANK[b.lead.status] ?? 9);
+    if (rank) return rank;
+    return (lastTouch(a.lead, threads) ?? "").localeCompare(lastTouch(b.lead, threads) ?? "");
+  });
 
   const page = Math.max(1, Number(p) || 1);
   const pages = Math.max(1, Math.ceil(groups.length / PAGE_SIZE));
   const rows = groups.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const qs = (next: Record<string, string>) =>
-    `/requests?${new URLSearchParams({ f, ...(q ? { q } : {}), ...(o ? { o } : {}), ...next }).toString()}`;
+    `/requests?${new URLSearchParams({ f, ...(q ? { q } : {}), ...(o ? { o } : {}), ...(sort !== "priority" ? { s: sort } : {}), ...next }).toString()}`;
 
   const people = groupByClient(all);
   const count = (statuses: string[]) => people.filter((g) => statuses.includes(g.lead.status)).length;
@@ -115,8 +144,20 @@ export default async function RequestsPage({
             My queue{mine ? ` · ${mine}` : ""}
           </Link>
         )}
-        <form action="/requests" className="ml-auto flex items-center gap-2">
+        <span className="ml-auto flex items-center gap-1 rounded-full p-0.5 ring-1 ring-line">
+          {[["priority", "Priority"], ["newest", "Newest"]].map(([key, label]) => (
+            <Link
+              key={key}
+              href={qs({ s: key, p: "1" })}
+              className={`rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-wider ${sort === key ? "bg-teal/15 text-teal" : "text-ink-faint hover:text-ink"}`}
+            >
+              {label}
+            </Link>
+          ))}
+        </span>
+        <form action="/requests" className="flex items-center gap-2">
           <input type="hidden" name="f" value={f} />
+          <input type="hidden" name="s" value={sort} />
           <select
             name="o"
             defaultValue={o}
@@ -154,6 +195,7 @@ export default async function RequestsPage({
                 <Th>Ballpark</Th>
                 <Th>Owner</Th>
                 <Th>Status</Th>
+                <Th align="right">Last touch</Th>
                 <Th align="right">Age</Th>
               </tr>
             </thead>
@@ -161,6 +203,7 @@ export default async function RequestsPage({
               {rows.map(({ lead: r, count: n, ballpark }) => {
                 const prop = r.propertyId ? db().properties.find((x) => x.id === r.propertyId) : propertyFor(r.clientId);
                 const late = r.status === "new";
+                const touch = touchTone(lastTouch(r, threads));
                 return (
                   <tr key={r.clientId} className="text-ink-dim transition-colors hover:bg-white/[0.03]">
                     <Td>
@@ -190,6 +233,7 @@ export default async function RequestsPage({
                       )}
                     </Td>
                     <Td><StatusPill status={r.status} /></Td>
+                    <Td align="right" className={`font-mono text-xs ${touch.className}`}>{touch.label}</Td>
                     <Td align="right" className={`font-mono text-xs ${late ? "text-bad" : ""}`}>{relative(r.createdAt)}</Td>
                   </tr>
                 );

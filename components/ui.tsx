@@ -83,7 +83,7 @@ export function ConnectionPill({ connected }: { connected: boolean }) {
 
 const STATUS_TONE: Record<string, Tone> = {
   // requests
-  new: "ember", contacted: "teal", assessment_scheduled: "teal", assessed: "teal",
+  new: "bad", contacted: "warn", assessment_scheduled: "teal", assessed: "ember",
   converted: "good", unqualified: "neutral",
   // quotes
   draft: "neutral", sent: "teal", viewed: "warn", approved: "good", declined: "bad", expired: "neutral",

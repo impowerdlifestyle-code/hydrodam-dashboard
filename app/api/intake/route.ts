@@ -5,6 +5,7 @@ import { toE164 } from "@/lib/telnyx";
 import { p, sendEmail, shell, teamRecipients, esc } from "@/lib/mail";
 import { LOGIN_LINK_DAYS, mintPortalLink, portalOrigin } from "@/lib/portal";
 import { render } from "@/lib/templates";
+import { textClient } from "@/lib/comms";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -160,6 +161,21 @@ export async function POST(req: Request) {
     // hearing about a lead must never be what decides whether the lead exists.
     void notifyTeam(body, request?.number, email, phone, portalUrl);
 
+    // They ticked the text box a moment ago, so text them. textClient re-checks
+    // consent, the carrier route and quiet hours itself.
+    if (body.smsConsent && phone) {
+      const ack = render("speed_to_lead", {
+        firstName: (body.name ?? "").trim().split(/\s+/)[0] || "there",
+        companyPhone: "(727) 613-1415",
+        portalUrl,
+      });
+      if (ack?.sms) {
+        void textClient({ clientId, phone, body: ack.sms, templateKey: "speed_to_lead" })
+          .then((r) => { if (!r.sent) console.info("[intake] ack text not sent:", r.reason); })
+          .catch((err) => console.warn("[intake] ack text failed", err));
+      }
+    }
+
     return NextResponse.json({ ok: true, requestId: request?.id, number: request?.number, portalUrl });
   } catch (e) {
     return NextResponse.json(
@@ -205,8 +221,13 @@ async function upsertClient(
   if (body.phone) lookups.push({ phone: `eq.${body.phone}` });
 
   for (const q of lookups) {
-    const [found] = await pg.select<{ id: string }>("clients", { select: "id", ...q, limit: "1" });
-    if (found) return found.id;
+    const [found] = await pg.select<{ id: string; first_name: string | null; email: string | null; phone: string | null; hubspot_contact_id: string | null }>(
+      "clients", { select: "id,first_name,email,phone,hubspot_contact_id", ...q, limit: "1" }
+    );
+    if (found) {
+      await fillBlanks(found, body);
+      return found.id;
+    }
   }
 
   const parts = (body.name ?? "").trim().split(/\s+/).filter(Boolean);
@@ -221,6 +242,37 @@ async function upsertClient(
     hubspot_contact_id: body.hubspotContactId ?? null,
   });
   return created.id;
+}
+
+/**
+ * A returning contact is often a thinner record than the form they just filled
+ * in: someone who first texted in exists as a phone number with the number for
+ * a name and no email, so they could never sign in to the portal by email and
+ * showed on the Requests board as "(904) 891-2081". Only blanks are filled. A
+ * name or email the office already has is never overwritten by a web form.
+ */
+async function fillBlanks(
+  found: { id: string; first_name: string | null; email: string | null; phone: string | null; hubspot_contact_id: string | null },
+  body: Body & { email?: string; phone?: string }
+): Promise<void> {
+  const patch: Record<string, unknown> = {};
+  if (!found.email && body.email) patch.email = body.email;
+  if (!found.phone && body.phone) patch.phone = body.phone;
+  if (!found.hubspot_contact_id && body.hubspotContactId) patch.hubspot_contact_id = body.hubspotContactId;
+
+  const nameIsPlaceholder = !found.first_name || /^[\d\s()+.-]+$/.test(found.first_name) || found.first_name.includes("@");
+  const parts = (body.name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (nameIsPlaceholder && parts.length) {
+    patch.first_name = parts.length > 1 ? parts.slice(0, -1).join(" ") : parts[0];
+    patch.last_name = parts.length > 1 ? parts.at(-1) : null;
+  }
+  if (!Object.keys(patch).length) return;
+  try {
+    await pg.patch("clients", { id: `eq.${found.id}` }, patch);
+  } catch (err) {
+    // A unique email or phone already held by another row. The lead still lands.
+    console.warn("[intake] could not fill blanks on client", found.id, err);
+  }
 }
 
 /** Street addresses are typed by humans; compare them the way humans mean them. */
