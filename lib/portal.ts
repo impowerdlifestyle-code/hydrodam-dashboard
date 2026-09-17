@@ -2,6 +2,8 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import * as pg from "@/lib/supabase";
 import { SUPABASE_LIVE } from "@/lib/supabase";
+import { db, ensureData, realClientId } from "@/lib/db";
+import { p as para, sendEmail, shell } from "@/lib/mail";
 
 /**
  * Client portal links.
@@ -128,4 +130,88 @@ async function log(
     // The audit trail must never be the reason a customer cannot open their
     // own project page.
   }
+}
+
+/**
+ * Where customer-facing links point. Configured explicitly in production so a
+ * link minted on a preview deployment never carries that preview's hostname.
+ */
+export function portalOrigin(host?: string | null): string {
+  const configured = process.env.PORTAL_BASE_URL?.replace(/\/+$/, "");
+  if (configured) return configured;
+  if (host && (host.startsWith("localhost") || host.startsWith("127.0.0.1"))) return `http://${host}`;
+  return "https://hydrodam-dashboard.vercel.app";
+}
+
+export const LOGIN_LINK_DAYS = 30;
+const LOGIN_WINDOW_MINUTES = 15;
+const LOGIN_MAX_PER_WINDOW = 3;
+
+/**
+ * The portal's front door: a customer types the email they gave HydroDam and
+ * gets a fresh link by email. No passwords, because the customer already
+ * proved ownership of the inbox the moment they open the link.
+ *
+ * Every attempt is recorded, matched or not, and the reply to the browser is
+ * the same either way, so the form cannot be used to check which emails have
+ * a project. A HubSpot-only lead becomes a client row on first sign-in, which
+ * is the same promotion the office performs when it first touches them.
+ */
+export async function requestPortalLogin(
+  rawEmail: string,
+  audit: { ip?: string; userAgent?: string }
+): Promise<{ sent: boolean; reason?: string }> {
+  const email = rawEmail.trim().toLowerCase();
+  if (!SUPABASE_LIVE) return { sent: false, reason: "no_db" };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { sent: false, reason: "invalid" };
+
+  const company = await pg.rpc<string>("company_id", {});
+  const since = new Date(Date.now() - LOGIN_WINDOW_MINUTES * 60_000).toISOString();
+  const recent = await pg.select<{ id: number }>("portal_login_requests", {
+    select: "id",
+    email: `eq.${email}`,
+    created_at: `gte.${since}`,
+    limit: String(LOGIN_MAX_PER_WINDOW + 1),
+  });
+  if (recent.length >= LOGIN_MAX_PER_WINDOW) return { sent: false, reason: "rate_limited" };
+
+  await ensureData();
+  const lead = db().clients.find((c) => !c.demo && c.email?.trim().toLowerCase() === email);
+
+  let clientId: string | undefined;
+  if (lead) {
+    try {
+      clientId = (await realClientId(lead.id)).clientId;
+    } catch (err) {
+      console.warn("[portal] could not promote lead for login", err);
+    }
+  }
+
+  await pg.insert("portal_login_requests", {
+    company_id: company,
+    email,
+    client_id: clientId ?? null,
+    matched: Boolean(clientId),
+    ip_address: audit.ip || null,
+    user_agent: audit.userAgent || null,
+  });
+  if (!clientId) return { sent: false, reason: "no_match" };
+
+  const token = await mintPortalLink({ clientId, days: LOGIN_LINK_DAYS });
+  if (!token) return { sent: false, reason: "mint_failed" };
+
+  const firstName = lead!.name.trim().split(/\s+/)[0] || "there";
+  const url = `${portalOrigin()}/p/${token}`;
+  const result = await sendEmail({
+    to: email,
+    subject: "Your HydroDam project link",
+    html: shell({
+      heading: `Here is your project, ${firstName}`,
+      body:
+        para("Use the button below to open your HydroDam project. It shows where things stand, lets you book your on-site assessment, and holds your estimate and documents.") +
+        para(`This link is private to you and works for ${LOGIN_LINK_DAYS} days. If you did not ask for it, you can ignore this email.`),
+      cta: { label: "Open my project", href: url },
+    }),
+  });
+  return result.ok ? { sent: true } : { sent: false, reason: result.error };
 }

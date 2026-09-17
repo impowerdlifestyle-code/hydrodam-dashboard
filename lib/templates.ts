@@ -46,11 +46,15 @@ export const TEMPLATES: Record<string, Builder> = {
       heading: `Thanks for getting in touch, ${esc(c.firstName)}`,
       body: sign(
         p("We have your enquiry and someone will call you within one business day to arrange a free on-site assessment.") +
-        p("The assessment is how we get you a real number: we measure every opening you want protected, check the ground surface each barrier has to seal against, and confirm what the install actually involves. It takes about half an hour.") +
-        p("If a storm is already forecast, call us instead of waiting — we will prioritise you.")
+        (c.portalUrl
+          ? p("Or skip the phone tag: open your project below, pick a time for the assessment that suits you, and follow every step from there. Your itemized estimate and documents will appear on the same page.")
+          : "") +
+        p("The assessment is how we get you a real number: we measure every opening you want protected, check the ground surface each barrier has to seal against, and confirm what the install actually involves. It takes about an hour.") +
+        p("If a storm is already forecast, call us instead of waiting and we will prioritise you.")
       ),
+      cta: c.portalUrl ? { label: "Open your project and book", href: c.portalUrl } : undefined,
     }),
-    sms: `Hi ${c.firstName}, HydroDam here. We have your flood barrier enquiry and will call within one business day to book your free assessment. Questions? ${PHONE}`,
+    sms: `Hi ${c.firstName}, HydroDam here. We have your flood barrier enquiry and will call within one business day to book your free assessment.${c.portalUrl ? ` Or book online: ${c.portalUrl}` : ""} Questions? ${PHONE}`,
   }),
 
   reminder_24h: (c) => ({

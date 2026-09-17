@@ -3,6 +3,7 @@ import * as pg from "@/lib/supabase";
 import { SUPABASE_LIVE } from "@/lib/supabase";
 import { toE164 } from "@/lib/telnyx";
 import { p, sendEmail, shell, teamRecipients, esc } from "@/lib/mail";
+import { LOGIN_LINK_DAYS, mintPortalLink, portalOrigin } from "@/lib/portal";
 import { render } from "@/lib/templates";
 
 export const runtime = "nodejs";
@@ -145,11 +146,21 @@ export async function POST(req: Request) {
       await claimSpeedToLead(company, clientId, request.id);
     }
 
+    // The lead's own door into the portal. Minted here so the very first email
+    // they get, from either system, already carries a link that works.
+    let portalUrl: string | undefined;
+    try {
+      const token = await mintPortalLink({ clientId, days: LOGIN_LINK_DAYS });
+      if (token) portalUrl = `${portalOrigin()}/p/${token}`;
+    } catch (err) {
+      console.warn("[intake] portal link not minted", err);
+    }
+
     // Best-effort, and deliberately after the row is committed: the office
     // hearing about a lead must never be what decides whether the lead exists.
-    void notifyTeam(body, request?.number, email, phone);
+    void notifyTeam(body, request?.number, email, phone, portalUrl);
 
-    return NextResponse.json({ ok: true, requestId: request?.id, number: request?.number });
+    return NextResponse.json({ ok: true, requestId: request?.id, number: request?.number, portalUrl });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message.slice(0, 300) : "Intake failed." },
@@ -298,7 +309,8 @@ async function notifyTeam(
   body: Body,
   number: number | undefined,
   email?: string,
-  phone?: string
+  phone?: string,
+  portalUrl?: string
 ): Promise<void> {
   const rows = [
     ["Name", body.name],
@@ -322,7 +334,7 @@ async function notifyTeam(
     html: shell({
       heading: `New request${number ? ` #${number}` : ""}`,
       body: rows + p("It is in the dashboard now, in the Requests queue."),
-      cta: { label: "Open the request", href: "https://hydrodam-dashboard.vercel.app/requests" },
+      cta: { label: "Open the request", href: `${portalOrigin()}/requests` },
     }),
   });
 
@@ -333,6 +345,7 @@ async function notifyTeam(
     const rendered = render("speed_to_lead", {
       firstName: (body.name ?? "").trim().split(/\s+/)[0] || "there",
       companyPhone: "(727) 613-1415",
+      portalUrl,
     });
     if (rendered) await sendEmail({ to: email, subject: rendered.subject, html: rendered.html });
   }

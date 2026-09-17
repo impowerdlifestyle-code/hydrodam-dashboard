@@ -12,7 +12,7 @@ import {
   updateVisit,
 } from "@/lib/db";
 import { specFor } from "@/lib/pricing";
-import { mintPortalLink, revokePortalLinks } from "@/lib/portal";
+import { mintPortalLink, portalOrigin, revokePortalLinks } from "@/lib/portal";
 import { syncTransition } from "@/lib/crm-sync";
 import { requireSession } from "@/lib/session";
 import type {
@@ -140,14 +140,6 @@ function humanise(err: unknown): string {
  * soon as the next deploy supersedes it. The canonical origin is a setting, not
  * something to read off whichever URL the office happened to be browsing.
  */
-async function portalOrigin(): Promise<string> {
-  const configured = process.env.PORTAL_BASE_URL?.replace(/\/+$/, "");
-  if (configured) return configured;
-
-  const host = (await headers()).get("host") ?? "";
-  if (host.startsWith("localhost") || host.startsWith("127.0.0.1")) return `http://${host}`;
-  return "https://hydrodam-dashboard.vercel.app";
-}
 
 /** The HubSpot contact behind any request, job or invoice, if it came from the CRM. */
 function contactFor(clientId: string | undefined): string | undefined {
@@ -456,7 +448,7 @@ async function dispatch(input: OpsInput): Promise<OpsResult> {
       return {
         ok: true,
         message: "Link created. It is shown once — copy it now.",
-        reveal: `${await portalOrigin()}/p/${token}`,
+        reveal: `${portalOrigin((await headers()).get("host"))}/p/${token}`,
       };
     }
 

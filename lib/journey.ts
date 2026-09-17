@@ -81,3 +81,45 @@ export function journeyFor(client: Client): Journey {
 
   return { current, applicable: true, source: "ops" };
 }
+
+/**
+ * The customer's six-step view: Assessment, Quote, Approval, Agreement,
+ * Install, Complete. Built on the office journey, then advanced by the things
+ * only the portal knows about: a self-booked visit, a QuickBooks estimate, an
+ * acceptance signed online. `current` is the step in progress (6 = all done).
+ */
+export type PortalJourney = { current: number; captions: (string | undefined)[]; applicable: boolean };
+
+export function portalJourney(
+  client: Client,
+  facts: {
+    assessmentBooked?: { when: string };
+    assessmentDone?: boolean;
+    estimate?: { total: string; accepted: boolean };
+    installBooked?: { when: string };
+    installed?: boolean;
+  }
+): PortalJourney {
+  const office = journeyFor(client);
+  if (!office.applicable) return { current: 0, captions: [], applicable: false };
+
+  let current = office.current <= 1 ? 0 : office.current - 1;
+  if (office.current === 6) current = 6;
+  // Invoice paid in HubSpot means the paperwork is behind them, whatever else the CRM says.
+  if (client.paid && current < 4) current = 4;
+
+  if (facts.assessmentDone && current < 1) current = 1;
+  if (facts.estimate && current < 2) current = 2;
+  if (facts.estimate?.accepted && current < 4) current = 4;
+  if (facts.installed) current = 6;
+
+  const captions: (string | undefined)[] = [];
+  captions[0] = current > 0 ? "Done" : facts.assessmentBooked ? `Booked for ${facts.assessmentBooked.when}` : "Pick a time below";
+  captions[1] = current > 1 ? (facts.estimate ? facts.estimate.total : "Done") : current === 1 ? "Being prepared after your visit" : undefined;
+  captions[2] = current > 2 ? "Done" : current === 2 ? "Review and accept your estimate" : undefined;
+  captions[3] = current > 3 ? "Signed online" : current === 3 ? "Warranty and terms" : undefined;
+  captions[4] = current > 4 ? "Done" : current === 4 ? (facts.installBooked ? `Booked for ${facts.installBooked.when}` : "We will call to schedule") : undefined;
+  captions[5] = current >= 6 ? "Protected" : undefined;
+
+  return { current, captions, applicable: true };
+}

@@ -38,7 +38,11 @@ export const config = {
     //   api/telnyx  an Ed25519 signature, checked before a field is read
     //   api/intake  a shared secret header, server-to-server
     //   api/cron    CRON_SECRET as a bearer token
+    //   api/quickbooks/callback
+    //               Intuit redirects the browser here; the state cookie is the
+    //               credential, checked in the route. The other quickbooks
+    //               routes stay behind the session.
     // plus the login flow, static assets and files.
-    "/((?!p/|login|api/auth|api/telnyx|api/intake|api/cron|_next/static|_next/image|favicon.ico|.*\\..*).*)",
+    "/((?!p/|login|api/auth|api/telnyx|api/intake|api/cron|api/quickbooks/callback|_next/static|_next/image|favicon.ico|.*\\..*).*)",
   ],
 };

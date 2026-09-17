@@ -5,6 +5,7 @@ export const NAV = [
   { href: "/schedule", label: "Schedule", icon: "calendar" },
   { href: "/jobs", label: "Jobs", icon: "wrench" },
   { href: "/invoices", label: "Invoices", icon: "dollar" },
+  { href: "/quickbooks", label: "QuickBooks", icon: "dollar" },
   { href: "/clients", label: "Clients", icon: "users" },
   { href: "/inbox", label: "Inbox", icon: "mail" },
   { href: "/team", label: "Team", icon: "briefcase" },
@@ -27,6 +28,9 @@ export const JOURNEY = [
   "Installation scheduled",
   "Installed",
 ] as const;
+
+/** The six steps the customer sees. Internal seven-step positions map onto these in lib/journey.ts. */
+export const PORTAL_JOURNEY = ["Assessment", "Quote", "Approval", "Agreement", "Install", "Complete"] as const;
 
 export const MESSAGE_TEMPLATES = [
   { key: "speed_to_lead", name: "Speed to lead", channel: "sms", body: "Thanks for reaching out to HydroDam, {{first_name}}. {{owner_name}} will call you within the hour to book your free assessment." },

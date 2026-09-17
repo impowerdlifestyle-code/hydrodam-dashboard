@@ -38,5 +38,13 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const clientId = await resolveToken(token);
   if (!clientId) notFound();
 
-  return <PortalView clientId={clientId} approveHref={`/p/${token}/approve`} docHref={(id) => `/p/${token}/doc/${id}`} />;
+  return (
+    <PortalView
+      clientId={clientId}
+      token={token}
+      approveHref={`/p/${token}/approve`}
+      docHref={(id) => `/p/${token}/doc/${id}`}
+      estimateHref={(id) => `/p/${token}/estimate/${id}`}
+    />
+  );
 }
