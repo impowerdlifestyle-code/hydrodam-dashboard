@@ -17,7 +17,7 @@ import type { Client, Conversation, Job, Message, Quote, ServiceRequest, Visit }
  * same gated path the booking and intake texts use.
  */
 
-export const PROMPT_VERSION = "2026-09-23.v1";
+export const PROMPT_VERSION = "2026-09-23.v2";
 export const DRAFT_MODEL = "claude-haiku-4-5-20251001";
 
 export const SMS_KINDS = [
@@ -430,6 +430,7 @@ Voice:
 - Never invent appointment dates or times, prices, quote numbers, lead times, crew names or any fact that is not in the record. If a price is needed and none is in the record, the only number you may use is HydroDam's published starting price, $1,850 installed.
 - Do not add "Reply STOP to opt out" or any opt-out line; the send path adds it where the law requires it.
 - Do not sign off with a long signature. Ending with "HydroDam" or "Emma, HydroDam" is fine when it reads naturally.
+- If the customer's own first name is Emma, never write "Emma from our office" or sign as Emma: say "our scheduler" or "we" and sign "HydroDam", so the text never reads as if they are texting themselves.
 
 Past decisions from the office are included. Copy the style of messages they sent, and avoid what they rejected.
 
