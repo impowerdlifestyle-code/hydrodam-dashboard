@@ -1,7 +1,8 @@
 import "server-only";
 import * as pg from "@/lib/supabase";
 import { SUPABASE_LIVE } from "@/lib/supabase";
-import { TELNYX_LIVE, sendSms, segmentsFor, toE164 } from "@/lib/telnyx";
+import { TELNYX_LIVE, sendSms, toE164 } from "@/lib/telnyx";
+import { segmentsFor } from "@/lib/format";
 
 /**
  * One-off SMS campaigns the office writes and sends by hand. Same gates as
@@ -22,7 +23,7 @@ export const MAX_PER_SEND = 100;
 const QUIET_START = 8 * 60;
 const QUIET_END = 21 * 60;
 const TZ = "America/New_York";
-const OPT_OUT = "Reply STOP to opt out.";
+export const OPT_OUT = "Reply STOP to opt out.";
 export const AUTOMATION_ID = "campaign";
 
 type ClientRow = { id: string; display_name: string; first_name: string | null; phone: string | null };
@@ -71,7 +72,7 @@ function merge(text: string, c: ClientRow): string {
 
 /** Why a send cannot happen at all, before any recipient is considered. */
 export function sendBlocker(): string | undefined {
-  if (!SUPABASE_LIVE) return "No database configured, so there is no audience to send to.";
+  if (!SUPABASE_LIVE) return "No database configured, so nothing can be sent or logged.";
   if (!TELNYX_LIVE) return "Telnyx is not configured on this deployment.";
   if (process.env.SMS_CARRIER_READY !== "1") return "Carrier registration is not marked complete, so texts would be filtered. Campaigns are held.";
   return undefined;

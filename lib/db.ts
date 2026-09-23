@@ -1249,17 +1249,23 @@ export function setSmsConsent(clientId: string, consented: boolean): Client | un
  * The one place that decides whether a text may leave the building.
  *
  * `reply` is a human answering a thread the customer opened — allowed unless
- * they have opted out. `marketing` needs recorded consent, which no HubSpot
- * contact currently has, so the composer stays honest about it.
+ * they have opted out. `transactional` is anything we start about their own
+ * project, and needs a recorded yes on that channel. `marketing` needs its own
+ * recorded consent, which no HubSpot contact currently has, so the composer
+ * stays honest about it. Consent is checked before the demo flag so a seeded
+ * client still shows the reason a real one would get.
  */
-export function smsGate(client: Client | undefined, kind: "reply" | "marketing"): { ok: boolean; reason?: string } {
+export function smsGate(client: Client | undefined, kind: "reply" | "transactional" | "marketing"): { ok: boolean; reason?: string } {
   if (!client) return { ok: false, reason: "No client on this thread." };
-  if (client.demo) return { ok: false, reason: "This is a seeded demo client. Sending would text a made-up number." };
   if (!client.phone) return { ok: false, reason: "No mobile number on this client." };
   if (client.smsOptOutAt) return { ok: false, reason: "This client texted STOP. Only they can restart the thread." };
+  if (kind === "transactional" && !client.smsConsent) {
+    return { ok: false, reason: "No transactional SMS consent on file. Record their consent on the client page first." };
+  }
   if (kind === "marketing" && !client.smsMarketingConsent) {
     return { ok: false, reason: "No marketing consent on file. Transactional replies still send." };
   }
+  if (client.demo) return { ok: false, reason: "This is a seeded demo client. Sending would text a made-up number." };
   return { ok: true };
 }
 

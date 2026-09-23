@@ -10,6 +10,7 @@ import { OpsButton, OpsGroup } from "@/components/Ops";
 import { OpeningForm, PropertyForm } from "@/components/OpsForms";
 import { RecordConsent } from "@/components/RecordConsent";
 import { DocumentUploader } from "@/components/DocumentUploader";
+import { TextsPanel } from "@/components/TextsPanel";
 import { DOC_KINDS, listDocuments } from "@/lib/documents";
 import { db, ensureData, getClient, invoicesFor, jobsFor, openingsFor, propertyFor, quotesFor } from "@/lib/db";
 import { money, phoneDisplay, shortDate } from "@/lib/format";
@@ -74,6 +75,13 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
           </p>
         )}
       </Panel>
+
+      {client.phone && (
+        <section className="mb-6">
+          <h2 className="mb-3 text-center font-mono text-[11px] uppercase tracking-wider text-ink-faint">Texts</h2>
+          <TextsPanel client={client} />
+        </section>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="flex flex-col gap-6 lg:col-span-2">

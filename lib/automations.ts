@@ -4,7 +4,8 @@ import { SUPABASE_LIVE } from "@/lib/supabase";
 import { MAIL_LIVE, sendEmail } from "@/lib/mail";
 import { render, renderCustom } from "@/lib/templates";
 import { customAutomationTemplates } from "@/lib/builder";
-import { TELNYX_LIVE, sendSms, segmentsFor, toE164 } from "@/lib/telnyx";
+import { TELNYX_LIVE, sendSms, toE164 } from "@/lib/telnyx";
+import { segmentsFor } from "@/lib/format";
 
 /**
  * The automation engine.

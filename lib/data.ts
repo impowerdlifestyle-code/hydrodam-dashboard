@@ -8,6 +8,7 @@ export const NAV = [
   { href: "/quickbooks", label: "QuickBooks", icon: "dollar" },
   { href: "/clients", label: "Clients", icon: "users" },
   { href: "/inbox", label: "Inbox", icon: "mail" },
+  { href: "/texts", label: "Texts", icon: "phone" },
   { href: "/team", label: "Team", icon: "briefcase" },
   { href: "/automations", label: "Automations", icon: "flow" },
   { href: "/campaigns", label: "Campaigns", icon: "send" },

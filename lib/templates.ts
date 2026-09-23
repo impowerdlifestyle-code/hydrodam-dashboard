@@ -129,7 +129,7 @@ export const TEMPLATES: Record<string, Builder> = {
         p("Your barriers are in and your 5-year warranty has started. If we did a good job, a short review helps other people on your street find us — most of our work comes from neighbours who saw an installation nearby.") +
         p("If anything is not right, reply to this instead. We would much rather fix it than read about it.")
       ),
-      cta: { label: "Leave a review", href: "https://g.page/r/thehydrodam/review" },
+      cta: { label: "Leave a review", href: "https://search.google.com/local/writereview?placeid=ChIJz4jfpxGKmaER_CXaCbjDOgU" },
     }),
     sms: `HydroDam: hope you're happy with your barriers. A quick review helps your neighbours find us. Anything not right? Just reply.`,
   }),

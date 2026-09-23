@@ -5,15 +5,8 @@ import { useRouter } from "next/navigation";
 import { Icon } from "@/components/Icon";
 import { buttonClass } from "@/components/ui";
 import { sendReplyAction } from "@/app/(app)/inbox/[id]/actions";
+import { segmentsFor } from "@/lib/format";
 
-
-/** Mirrors lib/telnyx.ts so the counter matches what Telnyx will actually bill. */
-function segments(text: string) {
-  const unicode = /[^\x20-\x7E\n\r]/.test(text);
-  const per = unicode ? 70 : 160;
-  const multi = unicode ? 67 : 153;
-  return text.length === 0 ? 0 : text.length <= per ? 1 : Math.ceil(text.length / multi);
-}
 
 export function ReplyComposer({
   conversationId,
@@ -40,7 +33,7 @@ export function ReplyComposer({
     );
   }
 
-  const count = segments(body);
+  const count = segmentsFor(body).segments;
 
   function send() {
     startTransition(async () => {

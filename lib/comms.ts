@@ -14,8 +14,8 @@ import {
   setSmsConsent as snapshotConsent,
   SMS_LEAD_SOURCE,
 } from "@/lib/db";
-import { phoneDisplay } from "@/lib/format";
-import { phoneKey, segmentsFor, sendSms, TELNYX_LIVE, toE164 } from "@/lib/telnyx";
+import { phoneDisplay, segmentsFor } from "@/lib/format";
+import { phoneKey, sendSms, TELNYX_LIVE, toE164 } from "@/lib/telnyx";
 
 /**
  * The comms slice, durable when Postgres is configured.
@@ -343,20 +343,20 @@ export async function recordOutbound(opts: {
   body: string;
   providerId?: string;
   templateKey?: string;
-}): Promise<void> {
+}): Promise<string | undefined> {
   if (!SUPABASE_LIVE) {
-    snapshotOutbound(opts.conversationId, opts.body, {
+    const msg = await snapshotOutbound(opts.conversationId, opts.body, {
       providerId: opts.providerId,
       deliveryStatus: "queued",
       templateKey: opts.templateKey,
     });
-    return;
+    return msg?.id;
   }
 
   const companyUuid = await company();
   const sentAt = new Date().toISOString();
 
-  await pg.insert("messages", {
+  const [row] = await pg.insert<{ id: string }>("messages", {
     company_id: companyUuid,
     conversation_id: opts.conversationId,
     client_id: opts.clientId || null,
@@ -377,6 +377,7 @@ export async function recordOutbound(opts: {
     last_message_at: sentAt,
     status: "open",
   });
+  return row?.id;
 }
 
 export async function applyReceipt(
@@ -456,27 +457,36 @@ export async function conversationIdForPhone(phone: string): Promise<string | un
 }
 
 /**
- * One transactional text to a customer, outside the automation engine: the
- * acknowledgement when a lead arrives, the confirmation when they book.
+ * One text to a customer, outside the automation engine: the acknowledgement
+ * when a lead arrives, the confirmation when they book, a copilot draft the
+ * office approved.
  *
  * The gates are the engine's own, in the same order: a registered carrier
- * route, a positive sms_transactional consent (absence of a yes is a no, and a
- * STOP reads as a no), and quiet hours. Nothing is sent and nothing is recorded
- * when any of them fails, and the reason comes back so the caller can log it.
+ * route, a positive consent on the channel the message belongs to (absence of
+ * a yes is a no, and a STOP reads as a no on both), and quiet hours. Nothing is
+ * sent and nothing is recorded when any of them fails, and the reason comes
+ * back so the caller can log it. A `dedupeKey` reserves a message_sends row
+ * before the provider call, so a double-click cannot text anyone twice.
  */
 export async function textClient(opts: {
   clientId: string;
   phone: string;
   body: string;
   templateKey: string;
-}): Promise<{ sent: boolean; reason?: string }> {
+  consent?: "sms_transactional" | "sms_marketing";
+  dedupeKey?: string;
+}): Promise<{ sent: boolean; reason?: string; messageId?: string }> {
   if (!SUPABASE_LIVE) return { sent: false, reason: "no_db" };
   if (!TELNYX_LIVE) return { sent: false, reason: "no_sms_key" };
   if (process.env.SMS_CARRIER_READY !== "1") return { sent: false, reason: "no_10dlc_registration" };
 
-  const [consent] = await pg.select<{ granted: boolean }>("v_current_consent", {
-    select: "granted", client_id: `eq.${opts.clientId}`, channel: "eq.sms_transactional", limit: "1",
+  const channel = opts.consent ?? "sms_transactional";
+  const rows = await pg.select<{ granted: boolean; channel: string }>("v_current_consent", {
+    select: "granted,channel", client_id: `eq.${opts.clientId}`, channel: "in.(sms_transactional,sms_marketing)",
   });
+  const transactional = rows.find((r) => r.channel === "sms_transactional");
+  if (transactional && !transactional.granted) return { sent: false, reason: "opted_out" };
+  const consent = rows.find((r) => r.channel === channel);
   if (!consent?.granted) return { sent: false, reason: consent ? "opted_out" : "no_consent" };
 
   const hour = Number(
@@ -484,14 +494,38 @@ export async function textClient(opts: {
   );
   if (hour < 8 || hour >= 21) return { sent: false, reason: "quiet_hours" };
 
+  const companyUuid = await company();
+  let reservation: string | undefined;
+  if (opts.dedupeKey) {
+    try {
+      const [row] = await pg.insert<{ id: string }>("message_sends", {
+        company_id: companyUuid,
+        dedupe_key: opts.dedupeKey,
+        automation_id: opts.templateKey,
+        client_id: opts.clientId,
+        channel: "sms",
+        status: "reserved",
+      });
+      reservation = row?.id;
+    } catch {
+      // 23505 on the dedupe index: this exact send is already in flight or done.
+    }
+    if (!reservation) return { sent: false, reason: "already_sent" };
+  }
+
   const to = toE164(opts.phone);
   const result = await sendSms(to, opts.body);
-  if (!result.ok) return { sent: false, reason: result.error };
+  if (!result.ok) {
+    if (reservation) {
+      await pg.patch("message_sends", { id: `eq.${reservation}` }, { status: "failed", suppression_reason: result.error.slice(0, 200) });
+    }
+    return { sent: false, reason: result.error };
+  }
 
   const [conversation] = await pg.insert<{ id: string }>(
     "conversations",
     {
-      company_id: await company(),
+      company_id: companyUuid,
       client_id: opts.clientId,
       channel: "sms",
       external_address: to,
@@ -500,7 +534,7 @@ export async function textClient(opts: {
     },
     { onConflict: "company_id,channel,external_address" }
   );
-  await recordOutbound({
+  const messageId = await recordOutbound({
     conversationId: conversation.id,
     clientId: opts.clientId,
     to,
@@ -508,5 +542,10 @@ export async function textClient(opts: {
     providerId: result.id,
     templateKey: opts.templateKey,
   });
-  return { sent: true };
+  if (reservation) {
+    await pg.patch("message_sends", { id: `eq.${reservation}` }, {
+      status: "sent", sent_at: new Date().toISOString(), message_id: messageId ?? null,
+    });
+  }
+  return { sent: true, messageId };
 }

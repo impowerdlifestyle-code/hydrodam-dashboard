@@ -17,6 +17,16 @@ export function pct(bps: number): string {
   return `${(bps / 100).toFixed(0)}%`;
 }
 
+/** GSM-7 segments to 160 chars, and any non-GSM character drops the whole message to 70. */
+export function segmentsFor(text: string): { chars: number; segments: number; unicode: boolean } {
+  const unicode = /[^\x20-\x7E\n\r]/.test(text);
+  const per = unicode ? 70 : 160;
+  const multi = unicode ? 67 : 153;
+  const chars = text.length;
+  const segments = chars === 0 ? 0 : chars <= per ? 1 : Math.ceil(chars / multi);
+  return { chars, segments, unicode };
+}
+
 const TZ = "America/New_York";
 
 export function shortDate(iso?: string): string {
