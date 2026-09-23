@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import { applyReceipt, recordInbound, recordKeywordConsent } from "@/lib/comms";
 import { keywordIn, sendSms, verifyWebhook } from "@/lib/telnyx";
+import { alertStaffOfInbound } from "@/lib/staff-alerts";
 
 /**
  * Telnyx webhook — set as the Inbound URL on the "Hydrodam sms" messaging
@@ -99,6 +100,8 @@ export async function POST(req: Request) {
       await recordKeywordConsent({ phone: from, clientId, granted: true, wording: TEXT_IN_CONSENT });
       await sendSms(from, TEXT_IN_REPLY);
     }
+
+    await alertStaffOfInbound({ from, body, clientId, conversationId, keyword });
 
     revalidatePath("/inbox");
     revalidatePath(`/inbox/${conversationId}`);
