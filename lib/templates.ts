@@ -167,7 +167,7 @@ export function render(automationId: string, ctx: TemplateContext): Rendered | n
 /** Tokens the Build Agent may use in a message it writes. */
 export const TOKENS = [
   "first_name", "company_phone", "quote_number", "quote_total", "invoice_number", "balance",
-  "due_date", "visit_window", "address", "days_overdue", "portal_url",
+  "due_date", "visit_date", "visit_window", "address", "days_overdue", "portal_url",
 ] as const;
 
 export function fill(text: string, c: TemplateContext): string {
@@ -179,6 +179,7 @@ export function fill(text: string, c: TemplateContext): string {
     invoice_number: c.invoiceNumber ? String(c.invoiceNumber) : "",
     balance: c.balanceCents ? money(c.balanceCents, true) : "",
     due_date: c.dueDate ?? "",
+    visit_date: c.visitDate ?? "",
     visit_window: c.visitWindow ?? "",
     address: c.address ?? "",
     days_overdue: c.daysOverdue != null ? String(c.daysOverdue) : "",

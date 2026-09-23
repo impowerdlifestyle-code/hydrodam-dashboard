@@ -63,7 +63,11 @@ async function company(): Promise<string> {
 
 export async function listItems<S = Record<string, unknown>>(kind?: Kind): Promise<Item<S>[]> {
   if (!SUPABASE_LIVE) return [];
-  const q: Record<string, string> = { select: ITEM_COLS, status: "neq.archived", order: "created_at.desc", limit: "200" };
+  // Automation wording overrides live in this table too, but they belong to the
+  // Automations page, not to the Builder list or the Inbox template chips.
+  const q: Record<string, string> = {
+    select: ITEM_COLS, status: "neq.archived", key: "not.like.automation_sms:*", order: "created_at.desc", limit: "200",
+  };
   if (kind) q.kind = `eq.${kind}`;
   return pg.select<Item<S>>("builder_items", q);
 }

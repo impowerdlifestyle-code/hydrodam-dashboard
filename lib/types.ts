@@ -275,11 +275,24 @@ export type Message = {
   createdAt: string;
   read: boolean;
   templateKey?: string;
+  /** Set on texts the automation engine or a campaign sent. */
+  automationId?: string;
   /** Telnyx message id, once the send is accepted. */
   providerId?: string;
   /** Last delivery receipt Telnyx sent for this message. */
   deliveryStatus?: "queued" | "sent" | "delivered" | "failed";
   deliveryError?: string;
+};
+
+/** One message_sends row: an automation or campaign attempt, sent or stopped at a gate. */
+export type SendAttempt = {
+  id: string;
+  automationKey: string;
+  clientId: string;
+  status: "reserved" | "sent" | "failed" | "suppressed";
+  reason?: string;
+  at: string;
+  messageId?: string;
 };
 
 export type Conversation = {
@@ -308,6 +321,8 @@ export type FormSubmission = {
 
 export type Automation = {
   id: string;
+  /** automation_config.automation_id, the key messages and message_sends carry. */
+  key: string;
   name: string;
   trigger: string;
   channels: ("sms" | "email")[];

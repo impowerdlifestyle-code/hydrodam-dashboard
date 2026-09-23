@@ -15,6 +15,8 @@ import { specFor } from "@/lib/pricing";
 import { mintPortalLink, portalOrigin, revokePortalLinks } from "@/lib/portal";
 import { syncTransition } from "@/lib/crm-sync";
 import { requireSession } from "@/lib/session";
+import { logChange } from "@/lib/text-automations";
+import { currentStaff } from "@/lib/whoami";
 import type {
   InvoiceKind, JobStatus, OpeningType, PaymentMethod, RequestStatus, Role, Series, VisitKind,
   VisitStatus,
@@ -361,14 +363,21 @@ async function dispatch(input: OpsInput): Promise<OpsResult> {
 
     // ---------------------------------------------------------- automations
 
-    case "automation.toggle":
+    case "automation.toggle": {
       await toggleAutomation(input.id, input.armed);
+      const auto = db().automations.find((a) => a.id === input.id);
+      if (auto) {
+        await logChange(auto.key, (await currentStaff())?.name, `Turned "${auto.name.replace(/\s*[—–]\s*/g, ", ")}" ${input.armed ? "on" : "off"}`, { armed: input.armed });
+        revalidatePath("/automations");
+        revalidatePath(`/automations/${auto.key}`);
+      }
       return {
         ok: true,
         message: input.armed
-          ? "Armed. The epoch is stamped now, so nothing older than this moment is eligible."
-          : "Disarmed. Runs are dry from here.",
+          ? "Turned on. It only counts things from this moment on, so it never catches up on older customers."
+          : "Turned off. It still checks who is due each morning but sends nothing.",
       };
+    }
 
     // ---------------------------------------------------------------- team
 

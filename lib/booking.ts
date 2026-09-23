@@ -8,6 +8,7 @@ import { addDaysKey, dayKey, formatKey, longDate, startOfWeekKey, timeRange, tod
 import { esc, p, sendEmail, shell, teamRecipients } from "@/lib/mail";
 import { portalOrigin } from "@/lib/portal";
 import { textClient } from "@/lib/comms";
+import { bookingText, smsFor } from "@/lib/text-automations";
 import * as pg from "@/lib/supabase";
 import type { Visit } from "@/lib/types";
 
@@ -253,7 +254,14 @@ async function notifyBooking(clientId: string, startISO: string, endISO: string,
   });
 
   if (client.phone) {
-    const text = `HydroDam: you're booked for ${when}${address ? ` at ${address}` : ""}. About an hour. Need to change it? (727) 613-1415`;
+    const ctx = {
+      firstName: client.name.split(" ")[0] || "there",
+      companyPhone: "(727) 613-1415",
+      visitDate: longDate(startISO),
+      visitWindow: timeRange(startISO, endISO).replace(/\s*[—–]\s*/, " to "),
+      address,
+    };
+    const text = await smsFor("appointment_confirm", ctx, bookingText(ctx));
     await textClient({ clientId, phone: client.phone, body: text, templateKey: "appointment_confirm" })
       .then((r) => { if (!r.sent) console.info("[booking] confirmation text not sent:", r.reason); })
       .catch((err) => console.warn("[booking] confirmation text failed", err));

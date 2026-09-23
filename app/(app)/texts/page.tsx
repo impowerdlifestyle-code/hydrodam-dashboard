@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { Badge, EmptyState, PageHeader, Panel, RowLink, SeedNotice, StatCard, StatusPill, Table, Td, Th } from "@/components/ui";
+import { FilterPills, Pager, SentTable } from "@/components/Outbox";
+import { DELIVERY, RANGES, SOURCES, outboundStats, outboundTexts, type Delivery, type Range, type SourceKey } from "@/lib/outbox";
 import { DB_LIVE, ensureData } from "@/lib/db";
 import { phoneDisplay, relative } from "@/lib/format";
 import { textRoster, type ConsentState } from "@/lib/sms-copilot";
@@ -22,10 +24,12 @@ const CONSENT: Record<ConsentState, { label: string; tone: "good" | "teal" | "ba
 export default async function TextsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ needs?: string; q?: string; p?: string }>;
+  searchParams: Promise<{ needs?: string; q?: string; p?: string; v?: string; s?: string; st?: string; r?: string }>;
 }) {
   await ensureData();
-  const { needs, q = "", p = "1" } = await searchParams;
+  const params = await searchParams;
+  if (params.v === "sent") return <SentView params={params} />;
+  const { needs, q = "", p = "1" } = params;
   const onlyNeeds = needs === "1";
   const telnyx = telnyxStatus();
 
@@ -71,12 +75,13 @@ export default async function TextsPage({
         {[
           { key: "all", label: "Everyone", href: q ? `/texts?q=${encodeURIComponent(q)}` : "/texts" },
           { key: "needs", label: `Needs a text (${needing.length})`, href: `/texts?${new URLSearchParams({ needs: "1", ...(q ? { q } : {}) })}` },
+          { key: "sent", label: "Sent", href: "/texts?v=sent" },
         ].map((x) => (
           <Link
             key={x.key}
             href={x.href}
             className={`rounded-full px-3.5 py-1.5 font-mono text-[11px] uppercase tracking-wider transition-colors ${
-              (x.key === "needs") === onlyNeeds ? "bg-teal/15 text-teal ring-1 ring-line-bright" : "text-ink-faint hover:bg-white/5 hover:text-ink"
+              x.key === (onlyNeeds ? "needs" : "all") ? "bg-teal/15 text-teal ring-1 ring-line-bright" : "text-ink-faint hover:bg-white/5 hover:text-ink"
             }`}
           >
             {x.label}
@@ -162,6 +167,95 @@ export default async function TextsPage({
           </span>
         </nav>
       )}
+    </>
+  );
+}
+
+const SENT_PAGE = 50;
+
+function TabNav({ active }: { active: "all" | "needs" | "sent" }) {
+  return (
+    <nav className="my-6 flex flex-wrap items-center gap-2">
+      {[
+        { key: "all", label: "Everyone", href: "/texts" },
+        { key: "needs", label: "Needs a text", href: "/texts?needs=1" },
+        { key: "sent", label: "Sent", href: "/texts?v=sent" },
+      ].map((x) => (
+        <Link
+          key={x.key}
+          href={x.href}
+          className={`rounded-full px-3.5 py-1.5 font-mono text-[11px] uppercase tracking-wider transition-colors ${
+            x.key === active ? "bg-teal/15 text-teal ring-1 ring-line-bright" : "text-ink-faint hover:bg-white/5 hover:text-ink"
+          }`}
+        >
+          {x.label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+/** Every outbound text, whoever sent it, newest first. */
+async function SentView({ params }: { params: { s?: string; st?: string; r?: string; p?: string } }) {
+  const source = params.s && params.s in SOURCES ? (params.s as SourceKey) : undefined;
+  const delivery = DELIVERY.includes(params.st as Delivery) ? (params.st as Delivery) : undefined;
+  const range: Range = params.r && params.r in RANGES ? (params.r as Range) : "30d";
+  const page = Math.max(1, Number(params.p) || 1);
+
+  const [stats, { rows, total }] = await Promise.all([
+    outboundStats(),
+    outboundTexts({ source, delivery, range, page, pageSize: SENT_PAGE }),
+  ]);
+
+  const href = (next: { s?: string; st?: string; r?: string; p?: number }) => {
+    const merged = { s: source, st: delivery, r: range === "30d" ? undefined : range, ...next };
+    const q = new URLSearchParams({ v: "sent" });
+    if (merged.s) q.set("s", merged.s);
+    if (merged.st) q.set("st", merged.st);
+    if (merged.r && merged.r !== "30d") q.set("r", merged.r);
+    if (next.p && next.p > 1) q.set("p", String(next.p));
+    return `/texts?${q.toString()}`;
+  };
+
+  return (
+    <>
+      <PageHeader title="Texts" subtitle="Every text that went out, from the copilot, automations, campaigns and the Inbox." />
+      <SeedNotice what="The texts listed here are sample rows." live={DB_LIVE} />
+
+      <div className="grid gap-4 sm:grid-cols-4">
+        <StatCard label="Sent today" value={stats.today} />
+        <StatCard label="Sent, 7 days" value={stats.week} accent="teal" />
+        <StatCard label="Delivered, 7 days" value={stats.deliveredPct === null ? "None" : `${stats.deliveredPct}%`} sub="confirmed by the phone company" accent="good" />
+        <StatCard label="Failed, 7 days" value={stats.failedWeek} accent={stats.failedWeek ? "bad" : "good"} href={href({ st: "failed", r: "7d" })} />
+      </div>
+
+      <TabNav active="sent" />
+
+      <div className="mb-4 flex flex-col gap-2.5">
+        <FilterPills
+          label="From"
+          options={[
+            { href: href({ s: undefined }), label: "All", active: !source },
+            ...Object.entries(SOURCES).map(([k, label]) => ({ href: href({ s: k }), label, active: source === k })),
+          ]}
+        />
+        <FilterPills
+          label="Status"
+          options={[
+            { href: href({ st: undefined }), label: "All", active: !delivery },
+            ...DELIVERY.map((d) => ({ href: href({ st: d }), label: d, active: delivery === d })),
+          ]}
+        />
+        <FilterPills
+          label="When"
+          options={Object.entries(RANGES).map(([k, label]) => ({ href: href({ r: k }), label, active: range === k }))}
+        />
+      </div>
+
+      <Panel>
+        <SentTable rows={rows} empty="No texts match these filters" />
+      </Panel>
+      <Pager page={page} pages={Math.max(1, Math.ceil(total / SENT_PAGE))} total={total} pageSize={SENT_PAGE} href={(n) => href({ p: n })} />
     </>
   );
 }

@@ -42,6 +42,27 @@ export function select<T>(table: string, query: Record<string, string>): Promise
   return send<T>(endpoint(table, query), { method: "GET", headers: headers() });
 }
 
+/**
+ * One page of rows plus the total that matched, from PostgREST's exact count.
+ * For lists that page through thousands of rows without ever loading them all.
+ */
+export async function selectPage<T>(
+  table: string,
+  query: Record<string, string>,
+  page: { limit: number; offset: number }
+): Promise<{ rows: T[]; total: number }> {
+  const url = endpoint(table, { ...query, limit: String(page.limit), offset: String(page.offset) });
+  const res = await fetch(url, { headers: headers({ Prefer: "count=exact" }), cache: "no-store" });
+  if (!res.ok) throw new Error(`Supabase ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const total = Number(res.headers.get("content-range")?.split("/")[1] ?? 0);
+  return { rows: (await res.json()) as T[], total: Number.isFinite(total) ? total : 0 };
+}
+
+/** How many rows match, without reading any of them. */
+export async function count(table: string, query: Record<string, string>): Promise<number> {
+  return (await selectPage(table, { ...query, select: "id" }, { limit: 1, offset: 0 })).total;
+}
+
 /** `onConflict` turns this into an upsert on that unique index. */
 export function insert<T>(
   table: string,

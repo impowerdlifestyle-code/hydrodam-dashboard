@@ -5,7 +5,7 @@ import {
 import type {
   Automation, Client, Conversation, FormSubmission, Invoice, Job, JobMaterial, LineItem,
   Message, Opening, Payment, Property, Quote, QuoteOpening, ServiceRequest, Snapshot,
-  Staff, TimeEntry, Visit,
+  SendAttempt, Staff, TimeEntry, Visit,
 } from "@/lib/types";
 
 /**
@@ -427,15 +427,34 @@ const conversations: Conversation[] = [
 ];
 
 const messages: Message[] = [
-  { id: "ms_1", conversationId: "cv_1", clientId: "c_delgado", channel: "sms", direction: "outbound", body: "Good morning Marisol — Luis and TJ are on their way, ETA about 20 minutes. — HydroDam", createdAt: at(0, 7, 35), read: true, templateKey: "on_my_way" },
+  { id: "ms_1", conversationId: "cv_1", clientId: "c_delgado", channel: "sms", direction: "outbound", body: "Good morning Marisol, Luis and TJ are on their way, ETA about 20 minutes. HydroDam", createdAt: at(0, 7, 35), read: true, templateKey: "on_my_way", automationId: "on_my_way", deliveryStatus: "delivered" },
   { id: "ms_2", conversationId: "cv_1", clientId: "c_delgado", channel: "sms", direction: "inbound", body: "Perfect, side gate is unlocked for them. Thank you!", createdAt: at(0, 8, 12), read: false },
-  { id: "ms_3", conversationId: "cv_2", clientId: "c_oleary", channel: "sms", direction: "outbound", body: "Hi Bridget, your quote #2110 is ready to view: https://ops.thehydrodam.com/l/8kd2m", createdAt: at(-7, 14, 2), read: true, templateKey: "quote_sent" },
+  { id: "ms_3", conversationId: "cv_2", clientId: "c_oleary", channel: "sms", direction: "outbound", body: "Hi Bridget, your quote #2110 is ready to view: https://ops.thehydrodam.com/l/8kd2m", createdAt: at(-7, 14, 2), read: true, templateKey: "quote_sent", deliveryStatus: "delivered" },
   { id: "ms_4", conversationId: "cv_2", clientId: "c_oleary", channel: "sms", direction: "inbound", body: "Looked it over. Can we do the garage in the heavier series and leave the slider for next year?", createdAt: at(-1, 16, 58), read: false },
   { id: "ms_5", conversationId: "cv_2", clientId: "c_oleary", channel: "sms", direction: "inbound", body: "Also what's the lead time if we sign this week?", createdAt: at(-1, 17, 4), read: false },
   { id: "ms_6", conversationId: "cv_3", clientId: "c_harborview", channel: "email", direction: "inbound", body: "The board approved the proposal at Tuesday's meeting. Please send the deposit invoice to accounts@harborviewcondos.com.", createdAt: at(-2, 10, 30), read: true },
-  { id: "ms_7", conversationId: "cv_4", clientId: "c_kwan", channel: "sms", direction: "outbound", body: "Hi Peter — following up on quote #2108. Happy to walk through the storefront options whenever suits. — Emma, HydroDam", createdAt: at(-4, 12, 15), read: true, templateKey: "quote_followup" },
-  { id: "ms_8", conversationId: "cv_5", clientId: "c_mercer", channel: "sms", direction: "outbound", body: "Thanks for reaching out to HydroDam, Yvonne. Emma will call you within the hour to book your free assessment.", createdAt: at(-1, 8, 20), read: true, templateKey: "speed_to_lead" },
+  { id: "ms_7", conversationId: "cv_4", clientId: "c_kwan", channel: "sms", direction: "outbound", body: "Hi Peter, following up on quote #2108. Happy to walk through the storefront options whenever suits. Emma, HydroDam", createdAt: at(-4, 12, 15), read: true, templateKey: "quote_followup", automationId: "quote_followup", deliveryStatus: "delivered" },
+  { id: "ms_8", conversationId: "cv_5", clientId: "c_mercer", channel: "sms", direction: "outbound", body: "Thanks for reaching out to HydroDam, Yvonne. Emma will call you within the hour to book your free assessment.", createdAt: at(-1, 8, 20), read: true, templateKey: "speed_to_lead", deliveryStatus: "sent" },
+  { id: "ms_9", conversationId: "cv_4", clientId: "c_kwan", channel: "sms", direction: "outbound", body: "HydroDam: hurricane season runs to November 30. If you want barriers fitted before the next storm, reply here and Emma will find you a time. Reply STOP to opt out.", createdAt: at(-2, 10, 0), read: true, templateKey: "campaign", automationId: "campaign", deliveryStatus: "delivered" },
+  { id: "ms_10", conversationId: "cv_2", clientId: "c_oleary", channel: "sms", direction: "outbound", body: "Hi Bridget, thanks for looking it over. I will check with Luis on the heavier series for the garage and come back to you today.", createdAt: at(-6, 9, 0), read: true, deliveryStatus: "failed", deliveryError: "Blocked by carrier" },
+  { id: "ms_11", conversationId: "cv_5", clientId: "c_mercer", channel: "sms", direction: "outbound", body: "Hi Yvonne, Emma here from HydroDam. Would you like to pick a time for your free on-site assessment? Any weekday works our end.", createdAt: at(0, 9, 5), read: true, templateKey: "copilot_assessment_booking_nudge", deliveryStatus: "queued" },
 ];
+
+/** Recent automation attempts, including the ones a gate stopped, as message_sends would record them. */
+export function seedSendAttempts(): SendAttempt[] {
+  return [
+    { id: "snd_1", automationKey: "on_my_way", clientId: "c_delgado", status: "sent", at: at(0, 7, 35), messageId: "ms_1" },
+    { id: "snd_2", automationKey: "reminder_24h", clientId: "c_whitfield", status: "suppressed", reason: "quiet_hours", at: at(0, 6, 0) },
+    { id: "snd_3", automationKey: "speed_to_lead", clientId: "c_mercer", status: "suppressed", reason: "no_10dlc_registration", at: at(-1, 8, 21) },
+    { id: "snd_4", automationKey: "review_request", clientId: "c_harborview", status: "suppressed", reason: "no_consent", at: at(-1, 10, 0) },
+    { id: "snd_5", automationKey: "campaign", clientId: "c_kwan", status: "sent", at: at(-2, 10, 0), messageId: "ms_9" },
+    { id: "snd_6", automationKey: "invoice_reminders", clientId: "c_alvarez", status: "failed", reason: "Telnyx returned 422.", at: at(-2, 9, 0) },
+    { id: "snd_7", automationKey: "quote_followup", clientId: "c_navarro", status: "suppressed", reason: "no_consent", at: at(-3, 10, 0) },
+    { id: "snd_8", automationKey: "quote_followup", clientId: "c_kwan", status: "sent", at: at(-4, 12, 15), messageId: "ms_7" },
+    { id: "snd_9", automationKey: "storm_surge", clientId: "c_sandoval", status: "suppressed", reason: "dry_run", at: at(-5, 10, 0) },
+    { id: "snd_10", automationKey: "quote_followup", clientId: "c_reddick", status: "suppressed", reason: "cap_reached", at: at(-6, 10, 0) },
+  ];
+}
 
 // ---------------------------------------------------------------- submissions
 
@@ -472,14 +491,14 @@ const submissions: FormSubmission[] = [
 // ---------------------------------------------------------------- automations
 
 const automations: Automation[] = [
-  { id: "a_speed", name: "Speed to lead", trigger: "request.created", channels: ["sms", "email"], offsetsDays: [0], armed: true, epochAt: at(-30), maxSendsPerRun: 200, sentLast30d: 41 },
-  { id: "a_reminder", name: "Appointment reminder — 24h", trigger: "visit.scheduled", channels: ["sms", "email"], offsetsDays: [-1], armed: true, epochAt: at(-30), maxSendsPerRun: 200, sentLast30d: 28 },
-  { id: "a_omw", name: "On my way", trigger: "visit.en_route", channels: ["sms"], offsetsDays: [0], armed: true, epochAt: at(-30), maxSendsPerRun: 200, sentLast30d: 19 },
-  { id: "a_quote", name: "Quote follow-up", trigger: "quote.sent", channels: ["email", "sms"], offsetsDays: [3, 7, 14], armed: true, epochAt: at(-30), maxSendsPerRun: 25, sentLast30d: 12 },
-  { id: "a_invoice", name: "Invoice reminders", trigger: "invoice.sent", channels: ["email", "sms"], offsetsDays: [-3, 0, 7, 14, 30], armed: true, epochAt: at(-30), maxSendsPerRun: 100, sentLast30d: 9 },
-  { id: "a_review", name: "Review request", trigger: "job.closed", channels: ["email", "sms"], offsetsDays: [7], armed: true, epochAt: at(-30), maxSendsPerRun: 25, sentLast30d: 4 },
-  { id: "a_nurture", name: "Dormant lead nurture", trigger: "lead.status_changed", channels: ["email"], offsetsDays: [14, 28, 42, 56], armed: false, maxSendsPerRun: 25, requiresConsent: "email_marketing", sentLast30d: 0 },
-  { id: "a_storm", name: "Storm-watch surge alert", trigger: "manual", channels: ["email", "sms"], offsetsDays: [0], armed: false, maxSendsPerRun: 25, requiresConsent: "sms_marketing", sentLast30d: 0 },
+  { id: "a_speed", key: "speed_to_lead", name: "Speed to lead", trigger: "request.created", channels: ["sms", "email"], offsetsDays: [0], armed: true, epochAt: at(-30), maxSendsPerRun: 200, sentLast30d: 41 },
+  { id: "a_reminder", key: "reminder_24h", name: "Appointment reminder — 24h", trigger: "visit.scheduled", channels: ["sms", "email"], offsetsDays: [-1], armed: true, epochAt: at(-30), maxSendsPerRun: 200, sentLast30d: 28 },
+  { id: "a_omw", key: "on_my_way", name: "On my way", trigger: "visit.en_route", channels: ["sms"], offsetsDays: [0], armed: true, epochAt: at(-30), maxSendsPerRun: 200, sentLast30d: 19 },
+  { id: "a_quote", key: "quote_followup", name: "Quote follow-up", trigger: "quote.sent", channels: ["email", "sms"], offsetsDays: [3, 7, 14], armed: true, epochAt: at(-30), maxSendsPerRun: 25, sentLast30d: 12 },
+  { id: "a_invoice", key: "invoice_reminders", name: "Invoice reminders", trigger: "invoice.sent", channels: ["email", "sms"], offsetsDays: [-3, 0, 7, 14, 30], armed: true, epochAt: at(-30), maxSendsPerRun: 100, sentLast30d: 9 },
+  { id: "a_review", key: "review_request", name: "Review request", trigger: "job.closed", channels: ["email", "sms"], offsetsDays: [7], armed: true, epochAt: at(-30), maxSendsPerRun: 25, sentLast30d: 4 },
+  { id: "a_nurture", key: "dormant_nurture", name: "Dormant lead nurture", trigger: "lead.status_changed", channels: ["email"], offsetsDays: [14, 28, 42, 56], armed: false, maxSendsPerRun: 25, requiresConsent: "email_marketing", sentLast30d: 0 },
+  { id: "a_storm", key: "storm_surge", name: "Storm-watch surge alert", trigger: "manual", channels: ["email", "sms"], offsetsDays: [0], armed: false, maxSendsPerRun: 25, requiresConsent: "sms_marketing", sentLast30d: 0 },
 ];
 
 // ---------------------------------------------------------------- export

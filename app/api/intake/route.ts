@@ -6,6 +6,7 @@ import { p, sendEmail, shell, teamRecipients, esc } from "@/lib/mail";
 import { LOGIN_LINK_DAYS, mintPortalLink, portalOrigin } from "@/lib/portal";
 import { render } from "@/lib/templates";
 import { textClient } from "@/lib/comms";
+import { smsFor } from "@/lib/text-automations";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -164,13 +165,14 @@ export async function POST(req: Request) {
     // They ticked the text box a moment ago, so text them. textClient re-checks
     // consent, the carrier route and quiet hours itself.
     if (body.smsConsent && phone) {
-      const ack = render("speed_to_lead", {
+      const ctx = {
         firstName: (body.name ?? "").trim().split(/\s+/)[0] || "there",
         companyPhone: "(727) 613-1415",
         portalUrl,
-      });
-      if (ack?.sms) {
-        void textClient({ clientId, phone, body: ack.sms, templateKey: "speed_to_lead" })
+      };
+      const sms = await smsFor("lead_ack", ctx, render("speed_to_lead", ctx)?.sms ?? "");
+      if (sms) {
+        void textClient({ clientId, phone, body: sms, templateKey: "speed_to_lead" })
           .then((r) => { if (!r.sent) console.info("[intake] ack text not sent:", r.reason); })
           .catch((err) => console.warn("[intake] ack text failed", err));
       }

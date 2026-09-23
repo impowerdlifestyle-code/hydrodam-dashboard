@@ -132,7 +132,7 @@ type ConversationRow = {
 type MessageRow = {
   id: string; conversation_id: string; client_id: string | null; channel: "sms" | "email";
   direction: "inbound" | "outbound"; status: string; body_text: string | null;
-  template_key: string | null; provider_message_id: string | null; error_message: string | null;
+  template_key: string | null; automation_id: string | null; provider_message_id: string | null; error_message: string | null;
   read_at: string | null; created_at: string;
 };
 
@@ -411,6 +411,7 @@ const toMessage = (r: MessageRow): Message => ({
   createdAt: r.created_at,
   read: r.direction === "outbound" || r.read_at !== null,
   templateKey: r.template_key ?? undefined,
+  automationId: r.automation_id ?? undefined,
   providerId: r.provider_message_id ?? undefined,
   deliveryStatus: r.direction === "outbound" ? DELIVERY[r.status] : undefined,
   deliveryError: r.error_message ?? undefined,
@@ -430,6 +431,7 @@ const toSubmission = (r: SubmissionRow): FormSubmission => ({
 
 const toAutomation = (r: AutomationRow, sent: number): Automation => ({
   id: r.id,
+  key: r.automation_id,
   name: r.name,
   trigger: r.trigger_event,
   channels: r.channels ?? [],
@@ -493,7 +495,7 @@ const COLS = {
     "id,invoice_id,client_id,method,status,amount_cents,fee_cents,received_on,expected_settlement_on,last4,brand",
   conversations: "id,client_id,channel,external_address,last_message_at,unread_count,status",
   messages:
-    "id,conversation_id,client_id,channel,direction,status,body_text,template_key,provider_message_id,error_message,read_at,created_at",
+    "id,conversation_id,client_id,channel,direction,status,body_text,template_key,automation_id,provider_message_id,error_message,read_at,created_at",
   form_submissions: "id,template_key,job_id,visit_id,client_id,status,answers,submitted_at,submitted_by_name",
   automation_config:
     "id,automation_id,name,trigger_event,epoch_at,armed,max_sends_per_run,offsets_days,channels,requires_consent",

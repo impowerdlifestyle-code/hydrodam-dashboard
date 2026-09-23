@@ -2,7 +2,9 @@ import "server-only";
 import * as pg from "@/lib/supabase";
 import { SUPABASE_LIVE } from "@/lib/supabase";
 import { MAIL_LIVE, sendEmail } from "@/lib/mail";
-import { render, renderCustom } from "@/lib/templates";
+import { fill, render, renderCustom } from "@/lib/templates";
+import { loadOverrides } from "@/lib/text-automations";
+import { withOptOutLine } from "@/lib/sms-wording";
 import { customAutomationTemplates } from "@/lib/builder";
 import { TELNYX_LIVE, sendSms, toE164 } from "@/lib/telnyx";
 import { segmentsFor } from "@/lib/format";
@@ -329,7 +331,7 @@ function ruleFor(cfg: ConfigRow): string {
 function windowLabel(startISO: string, endISO: string | null): string {
   const fmt = (iso: string) =>
     new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" }).format(new Date(iso));
-  return endISO ? `${fmt(startISO)}–${fmt(endISO)}` : fmt(startISO);
+  return endISO ? `${fmt(startISO)} to ${fmt(endISO)}` : fmt(startISO);
 }
 
 // --------------------------------------------------------------------- run
@@ -354,6 +356,9 @@ export async function runAutomations(opts: RunOptions = {}): Promise<RunSummary[
   const nowMinutes = minutesNowInTz();
   const summaries: RunSummary[] = [];
   const custom = await customAutomationTemplates();
+  // Wording the office saved on the Automations page. A failed read means the
+  // built-in wording goes out, never that nothing does.
+  const overrides = await loadOverrides().catch(() => ({} as Awaited<ReturnType<typeof loadOverrides>>));
 
   for (const cfg of configs) {
     if (opts.only && cfg.automation_id !== opts.only) continue;
@@ -385,6 +390,42 @@ export async function runAutomations(opts: RunOptions = {}): Promise<RunSummary[
       epoch_at: cfg.epoch_at,
     });
 
+    /**
+     * A due message a gate stopped. Logged to message_sends so the outbox can
+     * show what the automation tried and why it did not send. The key is per
+     * message and reason, never the candidate's own dedupe key: reserving that would cancel
+     * the message instead of delaying it. A human's forced dry run is a
+     * preview, so it leaves no trace.
+     */
+    const suppress = async (cand: Candidate, reason: string) => {
+      note(reason);
+      summary.suppressed += 1;
+      const channel = intendedChannel(cfg, cand);
+      if (opts.dryRun || !runRow || !channel) return;
+      try {
+        await pg.insert("message_sends", {
+          company_id: company,
+          // One row per message and reason, not per run: a lead without consent is
+          // re-checked every morning and would otherwise add a row a day forever.
+          // The repeat insert hits the dedupe index and is swallowed below.
+          dedupe_key: `suppressed:${reason}:${cand.dedupeKey}`,
+          automation_id: cfg.automation_id,
+          step_id: String(cand.offset),
+          occurrence: cand.offset,
+          client_id: cand.client.id,
+          visit_id: cand.entity.visitId ?? null,
+          job_id: cand.entity.jobId ?? null,
+          channel,
+          anchor_date: cand.anchorDate,
+          status: "suppressed",
+          suppression_reason: reason,
+          run_id: runRow.id,
+        });
+      } catch {
+        // The log is for people. It must never stop the sweep.
+      }
+    };
+
     try {
       const candidates = await candidatesFor(cfg, cfg.epoch_at);
       summary.considered = candidates.length;
@@ -399,8 +440,7 @@ export async function runAutomations(opts: RunOptions = {}): Promise<RunSummary[
         summary.due += 1;
 
         if (summary.sent >= cfg.max_sends_per_run) {
-          note("cap_reached");
-          summary.suppressed += 1;
+          await suppress(cand, "cap_reached");
           continue;
         }
 
@@ -408,23 +448,29 @@ export async function runAutomations(opts: RunOptions = {}): Promise<RunSummary[
         // never send, so quiet hours would silently cancel the message rather
         // than delay it.
         if (quiet) {
-          note("quiet_hours");
-          summary.suppressed += 1;
+          await suppress(cand, "quiet_hours");
           continue;
         }
 
         const channel = await pickChannel(cfg, cand);
         if (!channel.ok) {
-          note(channel.reason);
-          summary.suppressed += 1;
+          await suppress(cand, channel.reason);
           continue;
         }
 
         const ctx = { firstName: firstNameOf(cand.client), companyPhone: "(727) 613-1415", ...cand.context };
-        const rendered = render(cfg.automation_id, ctx) ?? renderCustom(custom[cfg.automation_id], ctx);
+        const built = render(cfg.automation_id, ctx) ?? renderCustom(custom[cfg.automation_id], ctx);
+        const own = overrides[cfg.automation_id];
+        const ownSms = own ? fill(own.body, ctx) : "";
+        const rendered = own && ownSms
+          ? {
+              subject: built?.subject ?? "",
+              html: built?.html ?? "",
+              sms: cfg.requires_consent === "sms_marketing" ? withOptOutLine(ownSms) : ownSms,
+            }
+          : built;
         if (!rendered || (channel.channel === "sms" ? !rendered.sms : !rendered.html)) {
-          note("no_template");
-          summary.suppressed += 1;
+          await suppress(cand, "no_template");
           continue;
         }
 
@@ -437,8 +483,7 @@ export async function runAutomations(opts: RunOptions = {}): Promise<RunSummary[
 
         // GATE 4. A dry run stops here, deliberately without reserving.
         if (!armed) {
-          summary.suppressed += 1;
-          note("dry_run");
+          await suppress(cand, "dry_run");
           continue;
         }
 
@@ -456,11 +501,12 @@ export async function runAutomations(opts: RunOptions = {}): Promise<RunSummary[
             : await sendSms(channel.address, rendered.sms);
 
         if ("ok" in result && result.ok) {
+          const messageId = await recordMessage(company, cfg, cand, channel, rendered);
           await pg.patch("message_sends", { id: `eq.${reservation}` }, {
             status: "sent",
             sent_at: new Date().toISOString(),
+            message_id: messageId ?? null,
           });
-          await recordMessage(company, cfg, cand, channel, rendered);
           summary.sent += 1;
         } else {
           // Failed rows fall outside the dedupe index, so the next run retries.
@@ -497,6 +543,13 @@ export async function runAutomations(opts: RunOptions = {}): Promise<RunSummary[
 
 const firstNameOf = (c: ClientRow): string =>
   (c.first_name?.trim() || c.display_name.split(" ")[0] || "there").trim();
+
+/** The channel pickChannel would choose before any gate, so a suppression can be filed under it. */
+function intendedChannel(cfg: ConfigRow, cand: Candidate): "email" | "sms" | null {
+  if (cfg.channels.includes("email") && cand.client.email) return "email";
+  if (cfg.channels.includes("sms") && cand.client.phone) return "sms";
+  return null;
+}
 
 type Channel =
   | { ok: true; channel: "email" | "sms"; address: string }
@@ -597,7 +650,7 @@ async function recordMessage(
   cand: Candidate,
   channel: { channel: "email" | "sms"; address: string },
   rendered: { subject: string; html: string; sms: string }
-): Promise<void> {
+): Promise<string | undefined> {
   try {
     const [conv] = await pg.insert<{ id: string }>(
       "conversations",
@@ -612,9 +665,9 @@ async function recordMessage(
       },
       { onConflict: "company_id,channel,external_address" }
     );
-    if (!conv) return;
+    if (!conv) return undefined;
 
-    await pg.insert("messages", {
+    const [msg] = await pg.insert<{ id: string }>("messages", {
       company_id: company,
       conversation_id: conv.id,
       client_id: cand.client.id,
@@ -632,6 +685,7 @@ async function recordMessage(
       automation_id: cfg.automation_id,
       sent_at: new Date().toISOString(),
     });
+    return msg?.id;
   } catch {
     // The message went out. Failing to mirror it must not look like a failure
     // to send, or the next run would send it again.

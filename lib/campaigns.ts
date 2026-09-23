@@ -186,8 +186,8 @@ export async function sendCampaign(name: string, audience: Audience, rawText: st
     const res = await sendSms(r.phone, r.text);
     if (res.ok) {
       sent += 1;
-      await pg.patch("message_sends", { id: `eq.${reservation}` }, { status: "sent", sent_at: new Date().toISOString() });
-      await mirror(company, r, run.id, res.id);
+      const messageId = await mirror(company, r, run.id, res.id);
+      await pg.patch("message_sends", { id: `eq.${reservation}` }, { status: "sent", sent_at: new Date().toISOString(), message_id: messageId ?? null });
     } else {
       failed += 1;
       if (reasons.length < 3) reasons.push(res.error);
@@ -208,7 +208,7 @@ export async function sendCampaign(name: string, audience: Audience, rawText: st
 }
 
 /** Mirror into the Inbox so a reply lands on a thread that already shows what we said. */
-async function mirror(company: string, r: Recipient, runId: string, providerId: string): Promise<void> {
+async function mirror(company: string, r: Recipient, runId: string, providerId: string): Promise<string | undefined> {
   try {
     const now = new Date().toISOString();
     const [conv] = await pg.insert<{ id: string }>(
@@ -216,8 +216,8 @@ async function mirror(company: string, r: Recipient, runId: string, providerId: 
       { company_id: company, client_id: r.id, channel: "sms", external_address: r.phone, last_message_at: now, status: "open" },
       { onConflict: "company_id,channel,external_address" }
     );
-    if (!conv) return;
-    await pg.insert("messages", {
+    if (!conv) return undefined;
+    const [msg] = await pg.insert<{ id: string }>("messages", {
       company_id: company,
       conversation_id: conv.id,
       client_id: r.id,
@@ -234,6 +234,7 @@ async function mirror(company: string, r: Recipient, runId: string, providerId: 
       automation_id: AUTOMATION_ID,
       sent_at: now,
     });
+    return msg?.id;
   } catch {
     // The text went out. A failed mirror must not read as a failed send.
   }
