@@ -1,17 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge, KeyValue, PageHeader, Panel, SectionLabel, StatusPill } from "@/components/ui";
-import { OpsSelect } from "@/components/Ops";
+import { OpsButton, OpsSelect } from "@/components/Ops";
 import { PropertyForm, QuoteFromRequestForm, ScheduleVisitForm } from "@/components/OpsForms";
 import { db, ensureData, getClient, getRequest, openingsFor, propertyFor, quoteFor, requestRef, staffName } from "@/lib/db";
-import { dateTime, money, phoneDisplay, relative } from "@/lib/format";
+import { dateTime, longDate, money, phoneDisplay, relative, timeRange } from "@/lib/format";
 import type { RequestStatus } from "@/lib/types";
 
 /** Only the moves 0001's status_transitions table will actually accept. */
 const NEXT_STATUS: Record<RequestStatus, RequestStatus[]> = {
   new: ["contacted", "assessment_scheduled", "unqualified"],
   contacted: ["assessment_scheduled", "unqualified"],
-  assessment_scheduled: ["assessed"],
+  assessment_scheduled: ["assessed"],  // back to contacted is Cancel assessment, which also clears the visit
   assessed: ["converted", "unqualified"],
   converted: [],
   unqualified: ["contacted"],
@@ -32,6 +32,9 @@ export default async function RequestDetail({ params }: { params: Promise<{ id: 
   const crew = db().staff.filter((s) => s.active);
   const openings = prop ? openingsFor(prop.id) : [];
   const existingQuote = quoteFor(r.id);
+  const booked = db()
+    .visits.filter((v) => v.requestId === r.id && v.kind === "assessment" && ["scheduled", "confirmed"].includes(v.status))
+    .sort((a, b) => a.scheduledStart.localeCompare(b.scheduledStart))[0];
   const statusOptions = [r.status, ...NEXT_STATUS[r.status]];
   const responseMins = r.firstResponseAt
     ? Math.round((Date.parse(r.firstResponseAt) - Date.parse(r.createdAt)) / 60_000)
@@ -76,6 +79,24 @@ export default async function RequestDetail({ params }: { params: Promise<{ id: 
                 </Link>
                 .
               </p>
+            ) : booked ? (
+              <div className="rounded-xl border border-line bg-abyss-2/60 p-4">
+                <p className="font-mono text-[10px] uppercase tracking-widest text-ink-faint">Assessment booked</p>
+                <p className="mt-1 text-sm font-semibold text-ink">
+                  {longDate(booked.scheduledStart)}, {timeRange(booked.scheduledStart, booked.scheduledEnd)}
+                </p>
+                <p className="mt-1 text-xs text-ink-dim">
+                  {booked.assignedTo.length ? booked.assignedTo.map(staffName).join(", ") : "Nobody assigned yet"}
+                </p>
+                <p className="mt-3 text-xs text-ink-faint">
+                  Cancelling takes it off the calendar and puts the lead back to contacted, here and in HubSpot. The customer is not messaged.
+                </p>
+                <div className="mt-3">
+                  <OpsButton input={{ kind: "visit.cancelAssessment", id: booked.id }} confirm="Click again to cancel it" icon="x">
+                    Cancel assessment
+                  </OpsButton>
+                </div>
+              </div>
             ) : (
               <div className="grid gap-6 md:grid-cols-2">
                 <div>

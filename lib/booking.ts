@@ -1,9 +1,9 @@
 import "server-only";
 import {
-  createVisit, db, DB_LIVE, ensureData, getClient, invalidate, propertyFor, realClientId, realRequestId,
-  saveProperty, updateRequest, updateVisit,
+  createVisit, db, DB_LIVE, ensureData, getClient, getRequest, getVisit, invalidate, propertyFor, realClientId,
+  realRequestId, saveProperty, updateRequest, updateVisit,
 } from "@/lib/db";
-import { syncTransition } from "@/lib/crm-sync";
+import { syncTransition, unbookAssessment } from "@/lib/crm-sync";
 import { addDaysKey, dayKey, formatKey, longDate, startOfWeekKey, timeRange, todayKey, weekdayOfKey } from "@/lib/format";
 import { esc, p, sendEmail, shell, teamRecipients } from "@/lib/mail";
 import { portalOrigin } from "@/lib/portal";
@@ -185,10 +185,10 @@ export async function cancelAssessment(clientId: string, visitId: string): Promi
   await ensureData();
   const visit = upcomingAssessment(clientId);
   if (!visit || visit.id !== visitId) return { ok: false, message: "That booking is no longer on the calendar." };
-  if (!["scheduled", "confirmed"].includes(visit.status)) {
+  if (!CANCELLABLE.has(visit.status)) {
     return { ok: false, message: "Our team is already on the way. Please call us to change it." };
   }
-  await updateVisit(visit.id, { status: "cancelled" });
+  await unbook(visit, "customer");
 
   const client = getClient(clientId);
   const [to, ...cc] = teamRecipients();
@@ -203,6 +203,45 @@ export async function cancelAssessment(clientId: string, visitId: string): Promi
     }),
   });
   return { ok: true, message: "Cancelled. Pick a new time whenever you are ready." };
+}
+
+/** The office taking an assessment off the calendar. Nothing is sent to the customer. */
+export async function cancelAssessmentByOffice(visitId: string): Promise<{ ok: boolean; message: string }> {
+  const visit = getVisit(visitId);
+  if (!visit || visit.kind !== "assessment" || !ACTIVE_VISIT.has(visit.status)) {
+    return { ok: false, message: "That assessment is no longer on the calendar." };
+  }
+  if (!CANCELLABLE.has(visit.status)) {
+    return { ok: false, message: "This visit is already under way, so it cannot be cancelled from here." };
+  }
+  await unbook(visit, "office");
+  return { ok: true, message: "Assessment cancelled. The lead is back to contacted." };
+}
+
+const CANCELLABLE = new Set<Visit["status"]>(["scheduled", "confirmed"]);
+
+/**
+ * Cancel the visit and, when it was the request's only booking, step the
+ * request back to contacted so the Requests board and HubSpot stop saying an
+ * assessment is scheduled.
+ */
+async function unbook(visit: Visit, by: "customer" | "office"): Promise<void> {
+  await updateVisit(visit.id, { status: "cancelled" });
+
+  const request = visit.requestId ? getRequest(visit.requestId) : undefined;
+  const stillBooked = db().visits.some(
+    (v) => v.id !== visit.id && v.requestId === visit.requestId && v.kind === "assessment" && ACTIVE_VISIT.has(v.status)
+  );
+  if (request?.status === "assessment_scheduled" && !stillBooked) {
+    await updateRequest(request.id, { status: "contacted" });
+  }
+
+  const who = by === "customer" ? "Customer cancelled their" : "Office cancelled the";
+  await unbookAssessment(
+    getClient(visit.clientId)?.hubspotContactId,
+    `${who} on-site assessment for ${longDate(visit.scheduledStart)}. Cancelled in HydroDam Ops.`
+  );
+  invalidate();
 }
 
 /** The request the visit hangs off: the newest open one, or a fresh one when the client has none. */

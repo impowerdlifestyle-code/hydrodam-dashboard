@@ -13,6 +13,7 @@ import {
 } from "@/lib/db";
 import { specFor } from "@/lib/pricing";
 import { mintPortalLink, portalOrigin, revokePortalLinks } from "@/lib/portal";
+import { cancelAssessmentByOffice } from "@/lib/booking";
 import { syncTransition } from "@/lib/crm-sync";
 import { requireSession } from "@/lib/session";
 import { logChange } from "@/lib/text-automations";
@@ -46,6 +47,7 @@ export type OpsInput =
   | { kind: "job.invoice"; id: string; invoiceKind: InvoiceKind }
   | { kind: "visit.status"; id: string; status: VisitStatus }
   | { kind: "visit.move"; id: string; startISO: string; staffIds?: string[] }
+  | { kind: "visit.cancelAssessment"; id: string }
   | { kind: "visit.notes"; id: string; notes: string }
   | { kind: "invoice.send"; id: string }
   | { kind: "invoice.void"; id: string }
@@ -327,6 +329,10 @@ async function dispatch(input: OpsInput): Promise<OpsResult> {
     case "visit.move":
       await moveVisit(input.id, input.startISO, input.staffIds);
       return { ok: true, message: "Rescheduled." };
+
+    case "visit.cancelAssessment":
+      if (!DB_LIVE) return { ok: false, message: NEEDS_DB };
+      return cancelAssessmentByOffice(input.id);
 
     case "visit.notes":
       await updateVisit(input.id, { crewNotes: input.notes });

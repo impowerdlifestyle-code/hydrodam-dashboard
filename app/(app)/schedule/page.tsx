@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Icon } from "@/components/Icon";
 import { Avatar, EmptyState, PageHeader, Panel, SectionLabel, StatusPill } from "@/components/ui";
 import { RescheduleForm } from "@/components/OpsForms";
+import { OpsButton } from "@/components/Ops";
 import { clientName, db, getStaff, propertyFor, visitsOnKey, ensureData } from "@/lib/db";
 import {
   addDaysKey, dayKey, formatKey, hoursInTz, startOfWeekKey, timeOfDay, timeRange, todayKey,
@@ -95,7 +96,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                         return (
                           <Link
                             key={v.id}
-                            href={v.jobId ? `/jobs/${v.jobId}` : `/clients/${v.clientId}`}
+                            href={v.jobId ? `/jobs/${v.jobId}` : v.requestId ? `/requests/${v.requestId}` : `/clients/${v.clientId}`}
                             className="block rounded-lg border-l-2 bg-white/[0.04] p-2 transition-colors hover:bg-white/[0.08]"
                             style={{ borderLeftColor: lead?.color ?? "#5f7385" }}
                           >
@@ -156,6 +157,13 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                   <div className="mt-3 border-t border-ember/20 pt-3">
                     <RescheduleForm visitId={v.id} crew={crew} current={v.assignedTo} />
                   </div>
+                  {v.kind === "assessment" && (v.status === "scheduled" || v.status === "confirmed") && (
+                    <div className="mt-3">
+                      <OpsButton input={{ kind: "visit.cancelAssessment", id: v.id }} confirm="Click again to cancel it" icon="x" variant="ghost">
+                        Cancel assessment
+                      </OpsButton>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -215,7 +223,7 @@ function DayBoard({ date, crew }: { date: string; crew: ReturnType<typeof db>["s
                     return (
                       <Link
                         key={v.id}
-                        href={v.jobId ? `/jobs/${v.jobId}` : `/clients/${v.clientId}`}
+                        href={v.jobId ? `/jobs/${v.jobId}` : v.requestId ? `/requests/${v.requestId}` : `/clients/${v.clientId}`}
                         className="absolute left-1 right-1 overflow-hidden rounded-lg border-l-2 p-1.5 transition-opacity hover:opacity-80"
                         style={{ top, height, background: `${s.color}22`, borderLeftColor: s.color }}
                       >

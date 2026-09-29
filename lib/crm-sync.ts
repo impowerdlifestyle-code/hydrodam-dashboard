@@ -86,6 +86,27 @@ async function pushLeadStatus(transition: Transition, contactId: string): Promis
   console.info(`[crm-sync] contact ${contactId} lead status ${current ?? "none"} -> ${target}`);
 }
 
+/**
+ * The one backwards move: a cancelled assessment takes the contact from
+ * Measurement Scheduled back to Attempted to Contact. Only when it is still
+ * sitting at the status the booking gave it, so a lead Mady has since moved
+ * on by hand is left alone.
+ */
+export async function unbookAssessment(contactId: string | undefined, note: string): Promise<void> {
+  if (!contactId) return;
+  try {
+    const from = LEAD_STATUS_FOR["request:assessment_scheduled"];
+    const to = LEAD_STATUS_FOR["request:contacted"];
+    if ((await contactLeadStatus(contactId)) === from) {
+      await hsPatch(`/crm/v3/objects/contacts/${contactId}`, { properties: { hs_lead_status: to } });
+      console.info(`[crm-sync] contact ${contactId} lead status ${from} -> ${to} (assessment cancelled)`);
+    }
+    await hsNote(contactId, note);
+  } catch (err) {
+    console.warn("[crm-sync] unbook push failed", contactId, err);
+  }
+}
+
 async function effectsFor({ entity, from, to }: Transition): Promise<string[]> {
   if (!SUPABASE_LIVE) return [];
   const [row] = await pg.select<{ effects: string[] }>("status_transitions", {
