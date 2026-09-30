@@ -1,4 +1,5 @@
 import "server-only";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { unstable_cache } from "next/cache";
 import type { Client, Property, ServiceRequest, RequestStatus } from "@/lib/types";
 
@@ -270,14 +271,25 @@ export type CrmSnapshot = {
  * of a dashboard reporting zero contacts. The caller treats a throw as "leave
  * the last good snapshot alone".
  */
-const cachedFetch = unstable_cache(fetchCrmUncached, ["hubspot-crm-snapshot-v5"], {
-  revalidate: 300,
-  tags: ["crm"],
-});
+//
+// Stored gzipped: the plain JSON of ~3,000 contacts runs past the data cache's
+// 2MB per-entry limit, and an oversized entry is silently never stored, which
+// sent every cold instance back to the ~17s HubSpot pull.
+const cachedFetch = unstable_cache(
+  async () => {
+    const started = Date.now();
+    const json = JSON.stringify(await fetchCrmUncached());
+    const packed = gzipSync(json).toString("base64");
+    console.log(`[crm] HubSpot pull ${Date.now() - started}ms, ${json.length}B json, ${packed.length}B cached`);
+    return packed;
+  },
+  ["hubspot-crm-snapshot-v6-gz"],
+  { revalidate: 300, tags: ["crm"] },
+);
 
 export async function fetchCrm(): Promise<CrmSnapshot | null> {
   if (!CRM_LIVE) return null;
-  return cachedFetch();
+  return JSON.parse(gunzipSync(Buffer.from(await cachedFetch(), "base64")).toString()) as CrmSnapshot;
 }
 
 async function fetchCrmUncached(): Promise<CrmSnapshot> {
