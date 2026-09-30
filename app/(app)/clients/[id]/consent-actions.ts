@@ -7,7 +7,7 @@ import { requireSession } from "@/lib/session";
 import { currentStaff } from "@/lib/whoami";
 import { toE164 } from "@/lib/telnyx";
 
-export const CONSENT_SOURCES = {
+const CONSENT_SOURCES = {
   phone_call: "Told us on the phone",
   in_person: "Told us in person",
   email_reply: "Said yes by email",
