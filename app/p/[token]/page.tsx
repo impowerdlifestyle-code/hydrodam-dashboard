@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { PortalView } from "@/components/PortalView";
-import { DB_LIVE, db, ensureData, getQuote } from "@/lib/db";
+import { DB_LIVE, db, ensureData, getClient, getQuote } from "@/lib/db";
 import { resolvePortalToken } from "@/lib/portal";
 
 export const dynamic = "force-dynamic";
@@ -33,10 +33,16 @@ async function resolveToken(token: string): Promise<string | null> {
 }
 
 export default async function PortalPage({ params }: { params: Promise<{ token: string }> }) {
-  await ensureData({ fresh: true });
   const { token } = await params;
+  if (!DB_LIVE) await ensureData();
   const clientId = await resolveToken(token);
   if (!clientId) notFound();
+
+  // The cached snapshot is enough to show the page; booking re-checks the slot
+  // against fresh rows. Only a client created since that snapshot, as happens
+  // when minting a link promotes a HubSpot lead, forces a reload.
+  await ensureData();
+  if (!getClient(clientId)) await ensureData({ fresh: true });
 
   return (
     <PortalView
