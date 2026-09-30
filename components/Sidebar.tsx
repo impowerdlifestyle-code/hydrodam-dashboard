@@ -19,7 +19,7 @@ export function Sidebar({ badges = {}, staff = [], whoId }: { badges?: Record<st
   }
 
   const nav = (
-    <nav className="flex flex-col gap-0.5">
+    <nav className="flex flex-col gap-px">
       {NAV.map((item) => {
         const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
         const count = badges[item.href];
@@ -28,11 +28,11 @@ export function Sidebar({ badges = {}, staff = [], whoId }: { badges?: Record<st
             key={item.href}
             href={item.href}
             onClick={() => setOpen(false)}
-            className={`flex items-center gap-3 rounded-xl px-3.5 py-2 text-sm transition-colors ${
+            className={`flex items-center gap-3 rounded-lg px-3 py-[5px] text-[13px] transition-colors ${
               active ? "bg-teal/15 font-semibold text-ink ring-1 ring-line-bright" : "text-ink-dim hover:bg-white/5 hover:text-ink"
             }`}
           >
-            <Icon name={item.icon} size={17} className={active ? "text-teal" : ""} />
+            <Icon name={item.icon} size={16} className={active ? "text-teal" : ""} />
             <span className="flex-1">{item.label}</span>
             {count ? (
               <span className="rounded-full bg-ember/20 px-1.5 py-0.5 font-mono text-[10px] font-bold text-ember">{count}</span>
@@ -55,16 +55,18 @@ export function Sidebar({ badges = {}, staff = [], whoId }: { badges?: Record<st
       {open && <div className="border-b border-line p-3 lg:hidden">{nav}<WhoAmI options={staff} current={whoId} /></div>}
 
       {/* desktop sidebar */}
-      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-line bg-abyss-2/40 p-4 lg:flex">
+      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-line bg-abyss-2/40 px-4 py-3 lg:flex">
         <Brand />
-        <div className="mt-5 flex-1 overflow-y-auto">{nav}</div>
+        <div className="mt-3 min-h-0 flex-1 overflow-y-auto">{nav}</div>
         <WhoAmI options={staff} current={whoId} />
-        <Link href="/field" className="flex items-center gap-3 rounded-xl px-3.5 py-2 text-sm text-ink-faint transition-colors hover:bg-white/5 hover:text-ink">
-          <Icon name="truck" size={17} /> Field app
-        </Link>
-        <button onClick={logout} className="flex items-center gap-3 rounded-xl px-3.5 py-2 text-sm text-ink-faint transition-colors hover:bg-white/5 hover:text-ink">
-          <Icon name="logout" size={17} /> Sign out
-        </button>
+        <div className="flex gap-1">
+          <Link href="/field" className="flex flex-1 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-1.5 text-[13px] text-ink-faint transition-colors hover:bg-white/5 hover:text-ink">
+            <Icon name="truck" size={16} /> Field app
+          </Link>
+          <button onClick={logout} className="flex flex-1 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-1.5 text-[13px] text-ink-faint transition-colors hover:bg-white/5 hover:text-ink">
+            <Icon name="logout" size={16} /> Sign out
+          </button>
+        </div>
       </aside>
     </>
   );

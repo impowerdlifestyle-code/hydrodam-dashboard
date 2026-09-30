@@ -11,13 +11,13 @@ export function WhoAmI({ options, current }: { options: WhoOption[]; current?: s
   const [pending, start] = useTransition();
   const router = useRouter();
   return (
-    <label className="flex items-center gap-3 rounded-xl px-3.5 py-2 text-sm text-ink-faint">
+    <label className="flex items-center gap-3 rounded-lg px-3 py-1.5 text-[13px] text-ink-faint">
       <Icon name="user" size={17} />
       <select
         value={current ?? ""}
         disabled={pending}
         onChange={(e) => { const id = e.target.value; start(async () => { await setWhoAmI(id); router.refresh(); }); }}
-        className="w-full min-w-0 truncate bg-transparent text-sm text-ink-dim outline-none"
+        className="w-full min-w-0 truncate bg-transparent text-[13px] text-ink-dim outline-none"
         aria-label="Who is using the dashboard"
       >
         <option value="">Who are you?</option>
