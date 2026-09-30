@@ -204,6 +204,7 @@ export async function requestPortalLogin(
   const url = `${portalOrigin()}/p/${token}`;
   const result = await sendEmail({
     to: email,
+    clientId,
     subject: "Your HydroDam project link",
     html: shell({
       heading: `Here is your project, ${firstName}`,

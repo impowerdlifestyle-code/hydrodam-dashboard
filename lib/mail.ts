@@ -1,6 +1,7 @@
 import "server-only";
 import * as pg from "@/lib/supabase";
 import { SUPABASE_LIVE } from "@/lib/supabase";
+import { companyId } from "@/lib/store";
 
 /**
  * Email, through Resend's REST API over fetch.
@@ -68,6 +69,8 @@ export async function sendEmail(opts: {
   replyTo?: string;
   from?: string;
   cc?: string[];
+  /** Set on mail to a customer so it lands in their correspondence history. */
+  clientId?: string;
 }): Promise<MailResult> {
   const key = process.env.RESEND_API_KEY;
   if (!key) return { ok: false, error: "RESEND_API_KEY is not set." };
@@ -95,9 +98,43 @@ export async function sendEmail(opts: {
 
     const body = (await res.json()) as { id?: string; message?: string };
     if (!res.ok) return { ok: false, error: body.message ?? `Resend ${res.status}` };
+    if (opts.clientId) await recordEmail({ ...opts, to: to[0], from: opts.from ?? FROM, clientId: opts.clientId, providerId: body.id });
     return { ok: true, id: body.id };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+async function recordEmail(m: { to: string; from: string; subject: string; html: string; clientId: string; providerId?: string }): Promise<void> {
+  if (!SUPABASE_LIVE) return;
+  const now = new Date().toISOString();
+  try {
+    const company = await companyId();
+    const [conv] = await pg.insert<{ id: string }>(
+      "conversations",
+      { company_id: company, client_id: m.clientId, channel: "email", external_address: m.to, subject: m.subject, last_message_at: now, status: "open" },
+      { onConflict: "company_id,channel,external_address" }
+    );
+    if (!conv) return;
+    await pg.insert("messages", {
+      company_id: company,
+      conversation_id: conv.id,
+      client_id: m.clientId,
+      channel: "email",
+      direction: "outbound",
+      status: "sent",
+      from_address: m.from,
+      to_address: m.to,
+      subject: m.subject,
+      body_text: m.subject,
+      body_html: m.html,
+      provider: "resend",
+      provider_message_id: m.providerId ?? null,
+      sent_at: now,
+    });
+  } catch (err) {
+    // The email went out; a failed mirror must not read as a failed send.
+    console.warn("[mail] could not record email in history", err);
   }
 }
 

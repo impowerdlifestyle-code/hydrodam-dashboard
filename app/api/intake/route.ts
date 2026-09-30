@@ -160,7 +160,7 @@ export async function POST(req: Request) {
 
     // Best-effort, and deliberately after the row is committed: the office
     // hearing about a lead must never be what decides whether the lead exists.
-    void notifyTeam(body, request?.number, email, phone, portalUrl);
+    void notifyTeam(body, clientId, request?.number, email, phone, portalUrl);
 
     // They ticked the text box a moment ago, so text them. textClient re-checks
     // consent, the carrier route and quiet hours itself.
@@ -361,6 +361,7 @@ async function addOpenings(
 
 async function notifyTeam(
   body: Body,
+  clientId: string,
   number: number | undefined,
   email?: string,
   phone?: string,
@@ -401,6 +402,6 @@ async function notifyTeam(
       companyPhone: "(727) 613-1415",
       portalUrl,
     });
-    if (rendered) await sendEmail({ to: email, subject: rendered.subject, html: rendered.html });
+    if (rendered) await sendEmail({ to: email, clientId, subject: rendered.subject, html: rendered.html });
   }
 }

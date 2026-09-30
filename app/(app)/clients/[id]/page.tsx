@@ -11,6 +11,7 @@ import { OpeningForm, PropertyForm } from "@/components/OpsForms";
 import { RecordConsent } from "@/components/RecordConsent";
 import { DocumentUploader } from "@/components/DocumentUploader";
 import { TextsPanel } from "@/components/TextsPanel";
+import { Correspondence } from "@/components/Correspondence";
 import { DOC_KINDS, listDocuments } from "@/lib/documents";
 import { db, ensureData, getClient, invoicesFor, jobsFor, openingsFor, propertyFor, quotesFor } from "@/lib/db";
 import { money, phoneDisplay, shortDate } from "@/lib/format";
@@ -82,6 +83,10 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
           <TextsPanel client={client} />
         </section>
       )}
+
+      <section className="mb-6">
+        <Correspondence client={client} />
+      </section>
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="flex flex-col gap-6 lg:col-span-2">

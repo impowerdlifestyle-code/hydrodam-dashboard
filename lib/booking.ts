@@ -309,6 +309,7 @@ async function notifyBooking(clientId: string, startISO: string, endISO: string,
   if (client.email) {
     await sendEmail({
       to: client.email,
+      clientId,
       subject: `Your HydroDam assessment is booked: ${longDate(startISO)}`,
       html: shell({
         heading: "You are booked",
