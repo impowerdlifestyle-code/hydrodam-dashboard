@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ConnectionPill, PageHeader } from "@/components/ui";
 import { FULL_WIDTH, renderPanel } from "@/components/overview/Panels";
-import { DB_LIVE, ensureData } from "@/lib/db";
+import { DB_LIVE } from "@/lib/db";
 import { layoutFor } from "@/lib/builder";
 import { currentRole, currentStaff } from "@/lib/whoami";
 
@@ -15,7 +15,6 @@ const SUBTITLE = {
 } as const;
 
 export default async function OverviewPage() {
-  await ensureData();
   const [who, role] = await Promise.all([currentStaff(), currentRole()]);
   const layout = await layoutFor(role);
 

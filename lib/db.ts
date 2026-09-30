@@ -34,14 +34,14 @@ export const DB_LIVE = SUPABASE_LIVE;
 const SNAPSHOT = Symbol.for("hydrodam.snapshot");
 const HYDRATION = Symbol.for("hydrodam.hydration");
 
-type Hydration = { loadedAt: number; inFlight: Promise<void> | null };
+type Hydration = { loadedAt: number; generation: number; inFlight: Promise<void> | null };
 type Host = typeof globalThis & { [SNAPSHOT]?: Snapshot; [HYDRATION]?: Hydration };
 
 const host = () => globalThis as Host;
 
 const hydration = (): Hydration => {
   const h = host();
-  if (!h[HYDRATION]) h[HYDRATION] = { loadedAt: 0, inFlight: null };
+  if (!h[HYDRATION]) h[HYDRATION] = { loadedAt: 0, generation: 0, inFlight: null };
   return h[HYDRATION];
 };
 
@@ -60,17 +60,22 @@ export function db(): Snapshot {
 }
 
 /**
- * How long a loaded snapshot is reused.
+ * How long a loaded snapshot is served without a reload.
  *
  * Long enough that the dozen `db()` calls in one page render share a single
- * sweep, short enough that a second browser tab sees a colleague's edit
- * without a hard refresh. Every write calls `invalidate()`, so this window
- * never delays your own changes.
+ * sweep. Past it and up to SNAPSHOT_MAX_STALE_MS the render is served from the
+ * snapshot it already has while a reload runs behind it, so eighteen Postgres
+ * round trips stay off every click; a colleague's edit shows on the next one.
+ * Every write calls `invalidate()`, which forces the next render to wait for
+ * fresh rows, so your own changes are never served stale.
  */
 const SNAPSHOT_TTL_MS = 2_000;
+const SNAPSHOT_MAX_STALE_MS = 60_000;
 
 export function invalidate(): void {
-  hydration().loadedAt = 0;
+  const state = hydration();
+  state.loadedAt = 0;
+  state.generation++;
 }
 
 // ---------------------------------------------------------------------- CRM
@@ -167,9 +172,16 @@ export async function ensureData(): Promise<void> {
     return;
   }
 
-  if (Date.now() - state.loadedAt < SNAPSHOT_TTL_MS) return;
-  if (state.inFlight) return state.inFlight;
+  const age = Date.now() - state.loadedAt;
+  if (age < SNAPSHOT_TTL_MS) return;
+  const servable = age < SNAPSHOT_MAX_STALE_MS;
+  if (state.inFlight) {
+    if (servable) return;
+    await state.inFlight;
+    return ensureData();
+  }
 
+  const generation = state.generation;
   state.inFlight = (async () => {
     try {
       const [snap] = await Promise.all([loadSnapshot(), ensureCrmCache()]);
@@ -177,12 +189,18 @@ export async function ensureData(): Promise<void> {
       // One assignment at the end: a concurrent render sees either the whole
       // old snapshot or the whole new one, never a half-built object.
       host()[SNAPSHOT] = snap;
-      state.loadedAt = Date.now();
+      // A write that landed mid-load may be missing from these rows, so they
+      // must not count as fresh.
+      if (state.generation === generation) state.loadedAt = Date.now();
     } finally {
       state.inFlight = null;
     }
   })();
 
+  if (servable) {
+    state.inFlight.catch(() => {});
+    return;
+  }
   return state.inFlight;
 }
 

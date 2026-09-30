@@ -12,8 +12,7 @@ export const metadata = { title: "Inbox · HydroDam Ops" };
 
 export default async function InboxPage() {
   await ensureData();
-  const threads = await inboxThreads();
-  const templates = await messageTemplates();
+  const [threads, templates] = await Promise.all([inboxThreads(), messageTemplates()]);
   const unread = threads.reduce((s, t) => s + t.conversation.unreadCount, 0);
   const outbound30 = threads.filter((t) => t.last?.direction === "outbound").length;
 
