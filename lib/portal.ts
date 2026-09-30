@@ -175,7 +175,7 @@ export async function requestPortalLogin(
   });
   if (recent.length >= LOGIN_MAX_PER_WINDOW) return { sent: false, reason: "rate_limited" };
 
-  await ensureData();
+  await ensureData({ fresh: true });
   const lead = db().clients.find((c) => !c.demo && c.email?.trim().toLowerCase() === email);
 
   let clientId: string | undefined;

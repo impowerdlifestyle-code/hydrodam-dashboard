@@ -122,7 +122,7 @@ const tools: Anthropic.Tool[] = [
 ];
 
 async function state(): Promise<string> {
-  await ensureData();
+  await ensureData({ fresh: true });
   const d = db();
   const [items, templates] = await Promise.all([listItems(), messageTemplates()]);
   const by = (k: Kind) => items.filter((i) => i.kind === k);

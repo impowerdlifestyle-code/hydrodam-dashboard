@@ -10,7 +10,7 @@ export async function refreshCrmAction(): Promise<{ ok: boolean; message: string
   revalidateTag("crm", "max");
   invalidateCrm();
   invalidate();
-  await ensureData();
+  await ensureData({ fresh: true });
   revalidatePath("/", "layout");
   return { ok: true, message: "Refreshed from HubSpot." };
 }

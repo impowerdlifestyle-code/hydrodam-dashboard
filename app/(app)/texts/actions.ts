@@ -35,7 +35,7 @@ function refresh(clientId: string) {
  */
 export async function sendDraftAction(draftId: string, pageClientId: string, text: string): Promise<Result> {
   await requireSession();
-  await ensureData();
+  await ensureData({ fresh: true });
   const body = text.trim();
   if (!body) return { ok: false, message: "Nothing to send." };
 

@@ -35,7 +35,7 @@ function Clauses({ title, clauses }: { title: string; clauses: Clause[] }) {
 }
 
 export default async function PortalApprovePage({ params }: { params: Promise<{ token: string }> }) {
-  await ensureData();
+  await ensureData({ fresh: true });
   const { token } = await params;
 
   const clientId = await resolveClient(token);

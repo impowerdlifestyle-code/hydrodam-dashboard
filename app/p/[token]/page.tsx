@@ -33,7 +33,7 @@ async function resolveToken(token: string): Promise<string | null> {
 }
 
 export default async function PortalPage({ params }: { params: Promise<{ token: string }> }) {
-  await ensureData();
+  await ensureData({ fresh: true });
   const { token } = await params;
   const clientId = await resolveToken(token);
   if (!clientId) notFound();

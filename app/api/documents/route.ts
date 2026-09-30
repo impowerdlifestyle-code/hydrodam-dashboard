@@ -15,7 +15,7 @@ type Body =
 export async function POST(req: Request) {
   if (!(await hasSession())) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   const body = (await req.json()) as Body;
-  await ensureData();
+  await ensureData({ fresh: true });
 
   if (body.action === "sign") {
     const { clientId } = await realClientId(body.clientId);

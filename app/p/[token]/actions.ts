@@ -78,7 +78,7 @@ export async function acceptEstimateFromPortal(
   const who = await clientFor(token, "/p/estimate/accept");
   if (!who) return EXPIRED;
 
-  await ensureData();
+  await ensureData({ fresh: true });
   const client = getClient(who.clientId);
   const estimate = await qbEstimateById(estimateId);
   const ownsIt =

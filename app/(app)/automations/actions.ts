@@ -17,7 +17,7 @@ function refresh(key: string) {
 /** Saves the office's wording for one text. The same checks the editor shows run again here. */
 export async function saveWordingAction(key: string, friendly: string): Promise<Result> {
   await requireSession();
-  await ensureData();
+  await ensureData({ fresh: true });
   const flow = await textFlow(key);
   if (!flow) return { ok: false, message: "That automation no longer exists." };
 
@@ -37,7 +37,7 @@ export async function saveWordingAction(key: string, friendly: string): Promise<
 
 export async function resetWordingAction(key: string): Promise<Result> {
   await requireSession();
-  await ensureData();
+  await ensureData({ fresh: true });
   const flow = await textFlow(key);
   if (!flow?.override) return { ok: true, message: "Already using the built-in wording." };
   const who = (await currentStaff())?.name;
@@ -50,7 +50,7 @@ export async function resetWordingAction(key: string): Promise<Result> {
 /** Days are relative to the flow's anchor: negative is before it, positive after. */
 export async function saveTimingAction(key: string, offsets: number[]): Promise<Result> {
   await requireSession();
-  await ensureData();
+  await ensureData({ fresh: true });
   const flow = await textFlow(key);
   if (!flow?.automation || !flow.anchor) return { ok: false, message: "This text has no timing to change." };
 

@@ -68,6 +68,11 @@ export function db(): Snapshot {
  * round trips stay off every click; a colleague's edit shows on the next one.
  * Every write calls `invalidate()`, which forces the next render to wait for
  * fresh rows, so your own changes are never served stale.
+ *
+ * Only the office's page views take the stale copy. The customer portal,
+ * booking and every write pass `{ fresh: true }`: a client promoted a moment
+ * ago on another instance must not render as a blank portal, and a slot
+ * picker must not offer a time someone else just took.
  */
 const SNAPSHOT_TTL_MS = 2_000;
 const SNAPSHOT_MAX_STALE_MS = 60_000;
@@ -156,7 +161,7 @@ function mergeCrm(snap: Snapshot): void {
  * Safe to call on every render: within the TTL it is a no-op, and concurrent
  * callers share the one in-flight load rather than each starting their own.
  */
-export async function ensureData(): Promise<void> {
+export async function ensureData(opts: { fresh?: boolean } = {}): Promise<void> {
   const state = hydration();
 
   if (!DB_LIVE) {
@@ -174,11 +179,11 @@ export async function ensureData(): Promise<void> {
 
   const age = Date.now() - state.loadedAt;
   if (age < SNAPSHOT_TTL_MS) return;
-  const servable = age < SNAPSHOT_MAX_STALE_MS;
+  const servable = !opts.fresh && age < SNAPSHOT_MAX_STALE_MS;
   if (state.inFlight) {
     if (servable) return;
     await state.inFlight;
-    return ensureData();
+    return ensureData(opts);
   }
 
   const generation = state.generation;

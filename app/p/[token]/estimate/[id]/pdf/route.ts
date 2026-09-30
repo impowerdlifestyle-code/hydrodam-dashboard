@@ -15,7 +15,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ token: s
   });
   if (!link) return new Response("Not found", { status: 404 });
 
-  await ensureData();
+  await ensureData({ fresh: true });
   const client = getClient(link.clientId);
   const estimate = await qbEstimateById(id);
   const ownsIt =

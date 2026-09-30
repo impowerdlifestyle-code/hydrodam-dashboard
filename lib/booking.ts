@@ -131,7 +131,7 @@ export async function bookAssessment(
   audit: { ip?: string }
 ): Promise<{ ok: boolean; message: string; visitId?: string }> {
   if (!DB_LIVE) return { ok: false, message: "Booking is not available right now. Please call us." };
-  await ensureData();
+  await ensureData({ fresh: true });
 
   const slot = availableSlots().flatMap((d) => d.slots).find((s) => s.startISO === input.startISO);
   if (!slot) return { ok: false, message: "That time has just been taken. Please pick another." };
@@ -145,7 +145,7 @@ export async function bookAssessment(
       return { ok: false, message: "Please tell us the address we are visiting." };
     }
     await saveProperty(realId, { address: a.line1.trim(), city: a.city.trim(), postalCode: a.postalCode.trim() });
-    await ensureData();
+    await ensureData({ fresh: true });
     property = propertyFor(realId);
   }
 
@@ -182,7 +182,7 @@ export async function bookAssessment(
 
 export async function cancelAssessment(clientId: string, visitId: string): Promise<{ ok: boolean; message: string }> {
   if (!DB_LIVE) return { ok: false, message: "Not available right now." };
-  await ensureData();
+  await ensureData({ fresh: true });
   const visit = upcomingAssessment(clientId);
   if (!visit || visit.id !== visitId) return { ok: false, message: "That booking is no longer on the calendar." };
   if (!CANCELLABLE.has(visit.status)) {
@@ -267,7 +267,7 @@ async function openRequestFor(clientId: string, notes?: string) {
     details: notes?.trim() || null,
   });
   invalidate();
-  await ensureData();
+  await ensureData({ fresh: true });
   return { id: row.id, status: "new" as const, details: notes?.trim() || undefined, firstResponseAt: undefined };
 }
 

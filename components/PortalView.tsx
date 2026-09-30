@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Icon } from "@/components/Icon";
 import { PortalBooking } from "@/components/PortalBooking";
@@ -37,7 +38,7 @@ export async function PortalView({
   estimateHref?: (estimateId: string) => string;
 }) {
   const client = getClient(clientId);
-  if (!client) return null;
+  if (!client) notFound();
 
   const [docs, qbEstimates] = await Promise.all([
     listDocuments(clientId, { clientVisibleOnly: true }),

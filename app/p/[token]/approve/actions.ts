@@ -43,7 +43,7 @@ export async function approveFromPortal(
   });
   if (!link) return { ok: false, message: "This link has expired. Ask HydroDam for a new one." };
 
-  await ensureData();
+  await ensureData({ fresh: true });
   const quote = getQuote(quoteId);
   if (!quote || quote.clientId !== link.clientId) {
     return { ok: false, message: "That quote isn't on this project." };

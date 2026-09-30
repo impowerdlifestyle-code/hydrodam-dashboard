@@ -13,7 +13,7 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: "Not signed in." }, { status: 401 });
   }
-  await ensureData();
+  await ensureData({ fresh: true });
 
   let input: { clientId?: string; kind?: string; instruction?: string };
   try {

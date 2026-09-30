@@ -106,7 +106,7 @@ export async function POST(req: Request) {
     // any screen. The proxy matcher covers /api/copilot today; this does not
     // depend on that staying true.
     await requireSession();
-    await ensureData();
+    await ensureData({ fresh: true });
 
     const { messages } = (await req.json()) as { messages: Msg[] };
     const key = process.env.ANTHROPIC_API_KEY;

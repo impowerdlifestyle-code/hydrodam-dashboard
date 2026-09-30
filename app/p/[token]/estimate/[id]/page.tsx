@@ -32,7 +32,7 @@ function Clauses({ title, clauses }: { title: string; clauses: Clause[] }) {
 
 export default async function PortalEstimatePage({ params }: { params: Promise<{ token: string; id: string }> }) {
   if (!DB_LIVE) notFound();
-  await ensureData();
+  await ensureData({ fresh: true });
   const { token, id } = await params;
 
   const head = await headers();

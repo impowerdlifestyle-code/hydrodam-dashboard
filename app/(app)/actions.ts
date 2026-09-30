@@ -82,7 +82,7 @@ const NEEDS_DB = "Connect Supabase first — this writes to the database.";
 
 export async function runOps(input: OpsInput): Promise<OpsResult> {
   await requireSession();
-  await ensureData();
+  await ensureData({ fresh: true });
 
   try {
     const result = await dispatch(input);
