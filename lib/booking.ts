@@ -1,4 +1,5 @@
 import "server-only";
+import { after } from "next/server";
 import {
   createVisit, db, DB_LIVE, ensureData, getClient, getRequest, getVisit, invalidate, propertyFor, realClientId,
   realRequestId, saveProperty, updateRequest, updateVisit,
@@ -175,7 +176,7 @@ export async function bookAssessment(
   }
 
   const endISO = new Date(Date.parse(input.startISO) + ASSESSMENT_MINUTES * 60_000).toISOString();
-  void notifyBooking(realId, input.startISO, endISO, property?.address, audit.ip);
+  after(() => notifyBooking(realId, input.startISO, endISO, property?.address, audit.ip));
   invalidate();
   return { ok: true, message: `Booked for ${longDate(input.startISO)}, ${timeRange(input.startISO, endISO)}.`, visitId };
 }
@@ -192,7 +193,7 @@ export async function cancelAssessment(clientId: string, visitId: string): Promi
 
   const client = getClient(clientId);
   const [to, ...cc] = teamRecipients();
-  void sendEmail({
+  after(() => sendEmail({
     to,
     cc,
     subject: `Assessment cancelled by customer: ${client?.name ?? clientId}`,
@@ -201,7 +202,7 @@ export async function cancelAssessment(clientId: string, visitId: string): Promi
       body: p(`${esc(client?.name ?? "A customer")} cancelled the on-site assessment that was booked for ${esc(longDate(visit.scheduledStart))}, ${esc(timeRange(visit.scheduledStart, visit.scheduledEnd))}. They can rebook from their portal, or you can reach them to reschedule.`),
       cta: { label: "Open the schedule", href: scheduleHref(visit.scheduledStart) },
     }),
-  });
+  }));
   return { ok: true, message: "Cancelled. Pick a new time whenever you are ready." };
 }
 

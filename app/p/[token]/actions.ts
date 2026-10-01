@@ -1,4 +1,5 @@
 "use server";
+import { after } from "next/server";
 
 import { createHash } from "node:crypto";
 import { headers } from "next/headers";
@@ -149,7 +150,7 @@ export async function acceptEstimateFromPortal(
   });
 
   const [to, ...cc] = teamRecipients();
-  void sendEmail({
+  after(() => sendEmail({
     to,
     cc,
     subject: `Estimate accepted: ${client?.name ?? "customer"}${estimate.docNumber ? `, #${estimate.docNumber}` : ""} (${money(estimate.totalCents, true)})`,
@@ -162,7 +163,7 @@ export async function acceptEstimateFromPortal(
         p("Next step: schedule the installation."),
       cta: { label: "Open the client", href: `${portalOrigin()}/clients/${who.clientId}` },
     }),
-  });
+  }));
 
   invalidate();
   revalidatePath(`/p/${token}`);

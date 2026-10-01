@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import * as pg from "@/lib/supabase";
 import { SUPABASE_LIVE } from "@/lib/supabase";
 import { toE164 } from "@/lib/telnyx";
@@ -160,7 +160,7 @@ export async function POST(req: Request) {
 
     // Best-effort, and deliberately after the row is committed: the office
     // hearing about a lead must never be what decides whether the lead exists.
-    void notifyTeam(body, clientId, request?.number, email, phone, portalUrl);
+    after(() => notifyTeam(body, clientId, request?.number, email, phone, portalUrl));
 
     // They ticked the text box a moment ago, so text them. textClient re-checks
     // consent, the carrier route and quiet hours itself.
@@ -172,9 +172,11 @@ export async function POST(req: Request) {
       };
       const sms = await smsFor("lead_ack", ctx, render("speed_to_lead", ctx)?.sms ?? "");
       if (sms) {
-        void textClient({ clientId, phone, body: sms, templateKey: "speed_to_lead" })
-          .then((r) => { if (!r.sent) console.info("[intake] ack text not sent:", r.reason); })
-          .catch((err) => console.warn("[intake] ack text failed", err));
+        after(() =>
+          textClient({ clientId, phone, body: sms, templateKey: "speed_to_lead" })
+            .then((r) => { if (!r.sent) console.info("[intake] ack text not sent:", r.reason); })
+            .catch((err) => console.warn("[intake] ack text failed", err))
+        );
       }
     }
 
