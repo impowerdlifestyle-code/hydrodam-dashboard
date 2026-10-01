@@ -33,9 +33,11 @@ export const DB_LIVE = SUPABASE_LIVE;
 // invisible to the Inbox that renders it.
 const SNAPSHOT = Symbol.for("hydrodam.snapshot");
 const HYDRATION = Symbol.for("hydrodam.hydration");
+// HubSpot lead id -> the Postgres client it was folded into, so old links still open.
+const FOLDED = Symbol.for("hydrodam.folded");
 
 type Hydration = { loadedAt: number; generation: number; inFlight: Promise<void> | null };
-type Host = typeof globalThis & { [SNAPSHOT]?: Snapshot; [HYDRATION]?: Hydration };
+type Host = typeof globalThis & { [SNAPSHOT]?: Snapshot; [HYDRATION]?: Hydration; [FOLDED]?: Map<string, string> };
 
 const host = () => globalThis as Host;
 
@@ -147,12 +149,47 @@ function mergeCrm(snap: Snapshot): void {
   const promotedRequests = new Set<string>();
   for (const r of snap.requests) if (r.externalId) promotedRequests.add(r.externalId);
 
-  const leads = crmCache.clients.filter((c) => !c.hubspotContactId || !promotedContacts.has(c.hubspotContactId));
+  // The same person reaching us by the website form and through HubSpot is one
+  // client. A lead whose email or phone is already on a Postgres row folds into
+  // that row, and its requests move onto it, so lists show them once.
+  const byEmail = new Map<string, string>();
+  const byPhone = new Map<string, string>();
+  for (const c of snap.clients) {
+    if (c.email) byEmail.set(c.email.trim().toLowerCase(), c.id);
+    const key = phoneKey(c.phone);
+    if (key.length === 10) byPhone.set(key, c.id);
+  }
+  const foldedInto = new Map<string, string>();
+  const leads = crmCache.clients.filter((c) => {
+    if (c.hubspotContactId && promotedContacts.has(c.hubspotContactId)) return false;
+    const key = phoneKey(c.phone);
+    const match = (c.email && byEmail.get(c.email.trim().toLowerCase())) || (key.length === 10 ? byPhone.get(key) : undefined);
+    if (match) foldedInto.set(c.id, match);
+    return !match;
+  });
+  if (foldedInto.size) {
+    const byId = new Map(snap.clients.map((c) => [c.id, c]));
+    for (const lead of crmCache.clients) {
+      const target = byId.get(foldedInto.get(lead.id) ?? "");
+      if (!target) continue;
+      target.paid ??= lead.paid;
+      target.crmStatus ??= lead.crmStatus;
+      target.crmStatusLabel ??= lead.crmStatusLabel;
+      target.hubspotDealId ??= lead.hubspotDealId;
+      target.hubspotDealStage ??= lead.hubspotDealStage;
+    }
+  }
   const leadIds = new Set(leads.map((c) => c.id));
+  host()[FOLDED] = foldedInto;
 
   snap.clients = [...snap.clients, ...leads];
   snap.properties = [...snap.properties, ...crmCache.properties.filter((p) => leadIds.has(p.clientId))];
-  snap.requests = [...snap.requests, ...crmCache.requests.filter((r) => !promotedRequests.has(r.id))];
+  snap.requests = [
+    ...snap.requests,
+    ...crmCache.requests
+      .filter((r) => !promotedRequests.has(r.id))
+      .map((r) => (foldedInto.has(r.clientId) ? { ...r, clientId: foldedInto.get(r.clientId)! } : r)),
+  ];
 }
 
 /**
@@ -223,9 +260,12 @@ export const liveRequests = (): ServiceRequest[] => db().requests.filter((r) => 
  * already rendered, every bookmark and every in-flight action still carries the
  * old id, so these resolve it rather than 404-ing on work the user just did.
  */
-export const getClient = (id: string): Client | undefined =>
-  db().clients.find((c) => c.id === id) ??
-  (id.startsWith("hs_") ? db().clients.find((c) => c.hubspotContactId === id.slice(3)) : undefined);
+export const getClient = (id: string): Client | undefined => {
+  const found = db().clients.find((c) => c.id === id);
+  if (found || !id.startsWith("hs_")) return found;
+  const folded = host()[FOLDED]?.get(id);
+  return db().clients.find((c) => c.hubspotContactId === id.slice(3) || c.id === folded);
+};
 export const getProperty = (id: string): Property | undefined => db().properties.find((p) => p.id === id);
 export const getQuote = (id: string): Quote | undefined => db().quotes.find((q) => q.id === id);
 export const getJob = (id: string): Job | undefined => db().jobs.find((j) => j.id === id);

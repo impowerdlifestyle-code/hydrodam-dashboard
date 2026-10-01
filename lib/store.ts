@@ -1,7 +1,7 @@
 import "server-only";
 import * as pg from "@/lib/supabase";
 import { SUPABASE_LIVE } from "@/lib/supabase";
-import { toE164 } from "@/lib/telnyx";
+import { phoneKey, toE164 } from "@/lib/telnyx";
 import type {
   Automation, Client, Conversation, FormSubmission, Invoice, Job, JobMaterial, LineItem,
   Message, Opening, Payment, Property, Quote, QuoteOpening, ServiceRequest, Snapshot,
@@ -620,6 +620,37 @@ function reachable(lead: Client): { email: string | null; phone: string | null }
   };
 }
 
+const likeLiteral = (v: string) => v.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+/**
+ * The client already on file for this email or phone, whatever case or format
+ * it was stored in. Email ignores case; phone compares the last ten digits,
+ * because rows hold "+17274920033" next to "(727) 492-0033".
+ */
+export async function findClientByContact(
+  email?: string | null,
+  phone?: string | null
+): Promise<{ id: string; hubspot_contact_id: string | null } | undefined> {
+  const e = email?.trim().toLowerCase();
+  if (e) {
+    const [row] = await pg.select<{ id: string; hubspot_contact_id: string | null }>("clients", {
+      select: "id,hubspot_contact_id", email: `ilike.${likeLiteral(e)}`, archived_at: "is.null",
+      order: "created_at.asc", limit: "1",
+    });
+    if (row) return row;
+  }
+  const key = phoneKey(phone ?? undefined);
+  if (key.length === 10) {
+    const rows = await pg.select<{ id: string; phone: string | null; hubspot_contact_id: string | null }>("clients", {
+      select: "id,phone,hubspot_contact_id", phone: `ilike.%${key.slice(-4)}`, archived_at: "is.null",
+      order: "created_at.asc", limit: "50",
+    });
+    const row = rows.find((r) => phoneKey(r.phone ?? undefined) === key);
+    if (row) return { id: row.id, hubspot_contact_id: row.hubspot_contact_id };
+  }
+  return undefined;
+}
+
 export async function promoteClient(lead: Client, property?: Property): Promise<{ clientId: string; propertyId?: string }> {
   const company = await companyId();
 
@@ -628,6 +659,17 @@ export async function promoteClient(lead: Client, property?: Property): Promise<
       select: "id", hubspot_contact_id: `eq.${lead.hubspotContactId}`, limit: "1",
     });
     if (existing) return { clientId: existing.id, propertyId: await propertyIdFor(existing.id, property) };
+  }
+
+  // The same person often reached us twice: a website form made a client row,
+  // and HubSpot holds them as a lead. Link the lead to that row rather than
+  // forking them into a second client.
+  const match = await findClientByContact(lead.email, lead.phone);
+  if (match) {
+    if (lead.hubspotContactId && !match.hubspot_contact_id) {
+      await pg.patch("clients", { id: `eq.${match.id}` }, { hubspot_contact_id: lead.hubspotContactId });
+    }
+    return { clientId: match.id, propertyId: await propertyIdFor(match.id, property) };
   }
 
   // A name is one text field in HubSpot and two columns here. Splitting on the

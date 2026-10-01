@@ -6,6 +6,7 @@ import { p, sendEmail, shell, teamRecipients, esc } from "@/lib/mail";
 import { LOGIN_LINK_DAYS, mintPortalLink, portalOrigin } from "@/lib/portal";
 import { render } from "@/lib/templates";
 import { textClient } from "@/lib/comms";
+import { findClientByContact } from "@/lib/store";
 import { smsFor } from "@/lib/text-automations";
 
 export const runtime = "nodejs";
@@ -219,14 +220,13 @@ async function upsertClient(
 ): Promise<string> {
   // Match on the HubSpot id first, then email, then phone — the same order the
   // dedupe indexes are built in.
-  const lookups: Record<string, string>[] = [];
-  if (body.hubspotContactId) lookups.push({ hubspot_contact_id: `eq.${body.hubspotContactId}` });
-  if (body.email) lookups.push({ email: `eq.${body.email}` });
-  if (body.phone) lookups.push({ phone: `eq.${body.phone}` });
-
-  for (const q of lookups) {
+  const byHubspot = body.hubspotContactId
+    ? (await pg.select<{ id: string }>("clients", { select: "id", hubspot_contact_id: `eq.${body.hubspotContactId}`, limit: "1" }))[0]
+    : undefined;
+  const matchId = byHubspot?.id ?? (await findClientByContact(body.email, body.phone))?.id;
+  if (matchId) {
     const [found] = await pg.select<{ id: string; first_name: string | null; email: string | null; phone: string | null; hubspot_contact_id: string | null }>(
-      "clients", { select: "id,first_name,email,phone,hubspot_contact_id", ...q, limit: "1" }
+      "clients", { select: "id,first_name,email,phone,hubspot_contact_id", id: `eq.${matchId}`, limit: "1" }
     );
     if (found) {
       await fillBlanks(found, body);
