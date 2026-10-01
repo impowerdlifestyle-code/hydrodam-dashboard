@@ -66,8 +66,8 @@ export default async function AutomationDetail({
             <div><dt className="font-semibold text-ink">Who gets it</dt><dd className="text-ink-dim">{flow.who}</dd></div>
             <div><dt className="font-semibold text-ink">When it goes out</dt><dd className="text-ink-dim">{flow.when} Never before 8am or after 9pm Eastern.</dd></div>
             <div><dt className="font-semibold text-ink">{consent.label}</dt><dd className="text-ink-dim">{consent.body}</dd></div>
-            {flow.emailFirst && (
-              <div><dt className="font-semibold text-ink">Email or text</dt><dd className="text-ink-dim">If we have their email address this one sends an email instead. Only people without one get the text.</dd></div>
+            {flow.emailFallback && (
+              <div><dt className="font-semibold text-ink">Email or text</dt><dd className="text-ink-dim">Anyone who said yes to texts gets a text. Everyone else gets an email, if we have their address.</dd></div>
             )}
             <div>
               <dt className="font-semibold text-ink">Right now</dt>

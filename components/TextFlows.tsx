@@ -52,7 +52,7 @@ export function stopsFor(flow: TextFlow): string[] {
     out.push(flow.on ? "Someone turns it off. While off it still checks who is due, but sends nothing." : "It is turned off right now, so nothing is sent.");
     if (flow.automation) out.push(`The daily limit is reached: at most ${flow.automation.maxSendsPerRun} per morning run, so a backlog can never flood people.`);
     out.push("They already got this step. Each person gets each step once, even if the run repeats.");
-    if (flow.emailFirst) out.push("We have their email address. This one emails first and only texts people with no email on file.");
+    if (flow.emailFallback) out.push("They have not said yes to texts. This one then emails them instead, if we have their address.");
   } else {
     out.push("It's outside texting hours (8am to 9pm Eastern). This one is skipped, not saved for later.");
   }
@@ -100,7 +100,7 @@ export function FlowCard({ flow, counts, sent }: { flow: TextFlow; counts?: Atte
         <div><dt className="inline font-semibold text-ink">When: </dt><dd className="inline text-ink-dim">{flow.when}</dd></div>
         <div><dt className="inline font-semibold text-ink">Who: </dt><dd className="inline text-ink-dim">{flow.who}</dd></div>
         <div><dt className="inline font-semibold text-ink">Permission: </dt><dd className="inline text-ink-dim">{consent.label}</dd></div>
-        {flow.emailFirst && <div className="text-ink-faint">Emails first when we have their email address.</div>}
+        {flow.emailFallback && <div className="text-ink-faint">Texts first; emails anyone who has not said yes to texts.</div>}
       </dl>
 
       <div className="mt-3 rounded-xl bg-teal/[0.07] px-3 py-2 ring-1 ring-line/70">

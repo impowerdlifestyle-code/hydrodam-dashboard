@@ -168,7 +168,7 @@ export type TextFlow = {
   after: boolean;
   marketing: boolean;
   /** Email goes first when the automation has both channels and we have an address. */
-  emailFirst: boolean;
+  emailFallback: boolean;
   wired: boolean;
   on: boolean;
   tokens: string[];
@@ -206,7 +206,7 @@ export async function textFlows(): Promise<TextFlow[]> {
         before: Boolean(meta ? meta.before : trig?.before),
         after: Boolean(meta ? meta.after : trig?.after),
         marketing,
-        emailFirst: a.channels.includes("email"),
+        emailFallback: a.channels.includes("email"),
         wired: meta ? meta.wired : Boolean(trig),
         on: a.armed,
         tokens: meta?.tokens ?? trig?.tokens ?? BASE,
@@ -228,7 +228,7 @@ export async function textFlows(): Promise<TextFlow[]> {
       before: false,
       after: false,
       marketing: false,
-      emailFirst: false,
+      emailFallback: false,
       wired: true,
       on: true,
       tokens: b.tokens,

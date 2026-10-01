@@ -144,8 +144,8 @@ export async function POST(req: Request) {
     // The acknowledgement goes out now rather than on tomorrow's cron — a lead
     // that submits at 9am should not hear nothing until the next sweep. Claiming
     // the speed_to_lead dedupe key here is what stops the cron sending it twice.
-    if (request?.id && email) {
-      await claimSpeedToLead(company, clientId, request.id);
+    if (request?.id && (email || (body.smsConsent && phone))) {
+      await claimSpeedToLead(company, clientId, request.id, body.smsConsent && phone ? "sms" : "email");
     }
 
     // The lead's own door into the portal. Minted here so the very first email
@@ -194,7 +194,7 @@ export async function POST(req: Request) {
  * finds this lead already handled. The two paths share one dedupe space by
  * construction rather than by both remembering to check a flag.
  */
-async function claimSpeedToLead(company: string, clientId: string, requestId: string): Promise<void> {
+async function claimSpeedToLead(company: string, clientId: string, requestId: string, channel: "email" | "sms"): Promise<void> {
   try {
     await pg.insert("message_sends", {
       company_id: company,
@@ -203,7 +203,7 @@ async function claimSpeedToLead(company: string, clientId: string, requestId: st
       step_id: "0",
       occurrence: 0,
       client_id: clientId,
-      channel: "email",
+      channel,
       anchor_date: new Date().toISOString().slice(0, 10),
       status: "sent",
       sent_at: new Date().toISOString(),

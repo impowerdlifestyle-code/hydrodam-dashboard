@@ -546,8 +546,8 @@ const firstNameOf = (c: ClientRow): string =>
 
 /** The channel pickChannel would choose before any gate, so a suppression can be filed under it. */
 function intendedChannel(cfg: ConfigRow, cand: Candidate): "email" | "sms" | null {
-  if (cfg.channels.includes("email") && cand.client.email) return "email";
   if (cfg.channels.includes("sms") && cand.client.phone) return "sms";
+  if (cfg.channels.includes("email") && cand.client.email) return "email";
   return null;
 }
 
@@ -564,6 +564,14 @@ async function pickChannel(cfg: ConfigRow, cand: Candidate): Promise<Channel> {
   const wantsEmail = cfg.channels.includes("email");
   const wantsSms = cfg.channels.includes("sms");
 
+  // A text first for anyone who said yes to texts, because that is what the
+  // office promised them; email is the fallback, not the default.
+  let smsBlocked: string | undefined;
+  if (wantsSms && cand.client.phone) {
+    smsBlocked = await smsBlockedFor(cfg, cand.client.id);
+    if (!smsBlocked) return { ok: true, channel: "sms", address: toE164(cand.client.phone) };
+  }
+
   if (wantsEmail && cand.client.email) {
     if (!MAIL_LIVE) return { ok: false, reason: "no_mail_key" };
     if (cfg.requires_consent === "email_marketing" && !(await hasConsent(cand.client.id, "email_marketing"))) {
@@ -572,28 +580,25 @@ async function pickChannel(cfg: ConfigRow, cand: Candidate): Promise<Channel> {
     return { ok: true, channel: "email", address: cand.client.email };
   }
 
-  if (wantsSms && cand.client.phone) {
-    if (!TELNYX_LIVE) return { ok: false, reason: "no_sms_key" };
-    // Hydro Dam LLC has no 10DLC brand or campaign, so a message to a real
-    // wireless number is carrier-filtered. Recording that as a suppression is
-    // honest; pretending it sent is not.
-    if (process.env.SMS_CARRIER_READY !== "1") return { ok: false, reason: "no_10dlc_registration" };
-    // Consent has to be POSITIVE, not merely un-revoked. The website's SMS box
-    // is unchecked and optional, so someone who submits the form without
-    // ticking it now has no consent row at all — and "no row" used to read as
-    // "never opted out", which would have texted exactly the people who
-    // declined. Absence of a yes is a no.
-    if (await optedOut(cand.client.id)) return { ok: false, reason: "opted_out" };
-    if (!(await hasConsent(cand.client.id, "sms_transactional"))) {
-      return { ok: false, reason: "no_consent" };
-    }
-    if (cfg.requires_consent === "sms_marketing" && !(await hasConsent(cand.client.id, "sms_marketing"))) {
-      return { ok: false, reason: "no_consent" };
-    }
-    return { ok: true, channel: "sms", address: toE164(cand.client.phone) };
-  }
-
+  if (smsBlocked) return { ok: false, reason: smsBlocked };
   return { ok: false, reason: cand.client.email || cand.client.phone ? "channel_unavailable" : "no_address" };
+}
+
+async function smsBlockedFor(cfg: ConfigRow, clientId: string): Promise<string | undefined> {
+  if (!TELNYX_LIVE) return "no_sms_key";
+  // Hydro Dam LLC has no 10DLC brand or campaign, so a message to a real
+  // wireless number is carrier-filtered. Recording that as a suppression is
+  // honest; pretending it sent is not.
+  if (process.env.SMS_CARRIER_READY !== "1") return "no_10dlc_registration";
+  // Consent has to be POSITIVE, not merely un-revoked. The website's SMS box
+  // is unchecked and optional, so someone who submits the form without
+  // ticking it now has no consent row at all — and "no row" used to read as
+  // "never opted out", which would have texted exactly the people who
+  // declined. Absence of a yes is a no.
+  if (await optedOut(clientId)) return "opted_out";
+  if (!(await hasConsent(clientId, "sms_transactional"))) return "no_consent";
+  if (cfg.requires_consent === "sms_marketing" && !(await hasConsent(clientId, "sms_marketing"))) return "no_consent";
+  return undefined;
 }
 
 async function hasConsent(clientId: string, channel: string): Promise<boolean> {
