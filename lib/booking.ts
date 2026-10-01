@@ -72,7 +72,7 @@ function instantOf(key: string, hour: number): Date {
 }
 
 /** The Schedule screen pages by week offset from this week, not by date. */
-function scheduleHref(iso: string): string {
+export function scheduleHref(iso: string): string {
   const [ty, tm, td] = startOfWeekKey(todayKey()).split("-").map(Number);
   const [vy, vm, vd] = startOfWeekKey(dayKey(iso)).split("-").map(Number);
   const weeks = Math.round((Date.UTC(vy, vm - 1, vd) - Date.UTC(ty, tm - 1, td)) / (7 * 86_400_000));
@@ -246,6 +246,53 @@ async function unbook(visit: Visit, by: "customer" | "office"): Promise<void> {
 }
 
 /** The request the visit hangs off: the newest open one, or a fresh one when the client has none. */
+/**
+ * The office booking an assessment from a client's profile. Reuses their open
+ * request, or opens one, so the visit lands on the same record as everything
+ * else about them, and the customer gets the same confirmation as booking it
+ * themselves from the portal.
+ */
+export async function bookAssessmentForClient(input: {
+  clientId: string;
+  startISO: string;
+  minutes: number;
+  staffIds: string[];
+}): Promise<{ ok: boolean; message: string }> {
+  if (!DB_LIVE) return { ok: false, message: "Connect Supabase first. This writes to the database." };
+  await ensureData({ fresh: true });
+
+  const { clientId } = await realClientId(input.clientId);
+  const request = await openRequestFor(clientId);
+  const visitId = await createVisit({
+    requestId: request.id,
+    kind: "assessment",
+    title: "On-site assessment",
+    startISO: input.startISO,
+    minutes: input.minutes,
+    staffIds: input.staffIds,
+  });
+  if (!visitId) return { ok: false, message: "Could not save that booking." };
+
+  if (request.status !== "assessment_scheduled") {
+    await syncTransition(
+      { entity: "request", from: request.status, to: "assessment_scheduled" },
+      getClient(clientId)?.hubspotContactId,
+      { note: `Office booked the on-site assessment for ${longDate(input.startISO)}.` }
+    );
+  }
+
+  const endISO = new Date(Date.parse(input.startISO) + input.minutes * 60_000).toISOString();
+  after(() => confirmToCustomer(clientId, input.startISO, endISO, propertyFor(clientId)?.address));
+  invalidate();
+  return { ok: true, message: `Booked for ${longDate(input.startISO)}, ${timeRange(input.startISO, endISO)}. The customer gets a confirmation.` };
+}
+
+/** Confirms a visit the office booked from a request page. */
+export function confirmOfficeBooking(clientId: string, startISO: string, minutes: number) {
+  const endISO = new Date(Date.parse(startISO) + minutes * 60_000).toISOString();
+  after(() => confirmToCustomer(clientId, startISO, endISO, propertyFor(clientId)?.address));
+}
+
 async function openRequestFor(clientId: string, notes?: string) {
   const open = db()
     .requests.filter((r) => r.clientId === clientId && !r.demo && !["converted", "unqualified"].includes(r.status))
@@ -292,6 +339,15 @@ async function notifyBooking(clientId: string, startISO: string, endISO: string,
       cta: { label: "Open the schedule", href: scheduleHref(startISO) },
     }),
   });
+
+  await confirmToCustomer(clientId, startISO, endISO, address);
+}
+
+/** The customer's own confirmation, by text and email, however the visit was booked. */
+async function confirmToCustomer(clientId: string, startISO: string, endISO: string, address: string | undefined) {
+  const client = getClient(clientId);
+  if (!client) return;
+  const when = `${longDate(startISO)}, ${timeRange(startISO, endISO)}`;
 
   if (client.phone) {
     const ctx = {

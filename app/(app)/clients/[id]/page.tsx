@@ -7,14 +7,15 @@ import { JOURNEY } from "@/lib/data";
 import { journeyFor } from "@/lib/journey";
 import { Stepper } from "@/components/ui";
 import { OpsButton, OpsGroup } from "@/components/Ops";
-import { OpeningForm, PropertyForm } from "@/components/OpsForms";
+import { OpeningForm, PropertyForm, ScheduleVisitForm } from "@/components/OpsForms";
 import { RecordConsent } from "@/components/RecordConsent";
 import { DocumentUploader } from "@/components/DocumentUploader";
 import { TextsPanel } from "@/components/TextsPanel";
 import { Correspondence } from "@/components/Correspondence";
 import { DOC_KINDS, listDocuments } from "@/lib/documents";
 import { db, ensureData, getClient, invoicesFor, jobsFor, openingsFor, propertyFor, quotesFor } from "@/lib/db";
-import { money, phoneDisplay, shortDate } from "@/lib/format";
+import { longDate, money, phoneDisplay, shortDate, timeRange } from "@/lib/format";
+import { scheduleHref, upcomingAssessment } from "@/lib/booking";
 
 export const dynamic = "force-dynamic";
 // First render of a cold instance pages ~3,000 HubSpot contacts.
@@ -33,6 +34,8 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
   const invoices = invoicesFor(client.id);
   const openings = prop ? openingsFor(prop.id) : [];
   const conversation = db().conversations.find((c) => c.clientId === client.id);
+  const assessment = upcomingAssessment(client.id);
+  const crew = db().staff.filter((s) => s.active).map((s) => ({ id: s.id, name: s.name }));
   const lifetime = jobs.reduce((s, j) => s + j.contractCents, 0);
   const openBalance = invoices.reduce((s, i) => s + (i.totalCents - i.amountPaidCents), 0);
 
@@ -51,7 +54,8 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
         subtitle={prop ? `${prop.address}, ${prop.city} ${prop.postalCode}` : "No property on file"}
         action={
           <div className="flex flex-wrap gap-2">
-            <LinkButton href="/quotes/new" icon="file">New quote</LinkButton>
+            <LinkButton href="#schedule" icon="calendar">Schedule</LinkButton>
+            <LinkButton href="/quotes/new" variant="secondary" icon="file">New quote</LinkButton>
             {conversation && <LinkButton href={`/inbox/${conversation.id}`} variant="secondary" icon="mail">Message</LinkButton>}
           </div>
         }
@@ -83,6 +87,23 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
           <TextsPanel client={client} />
         </section>
       )}
+
+      <section id="schedule" className="mb-6 scroll-mt-6">
+        <Panel>
+          <SectionLabel>Schedule an assessment</SectionLabel>
+          {assessment ? (
+            <p className="mb-4 rounded-xl border border-teal/30 bg-teal/[0.06] px-4 py-3 text-sm text-ink">
+              Booked for <strong>{longDate(assessment.scheduledStart)}, {timeRange(assessment.scheduledStart, assessment.scheduledEnd)}</strong>.
+              {" "}<Link href={scheduleHref(assessment.scheduledStart)} className="text-teal hover:underline">Open the schedule</Link> to move or cancel it.
+            </p>
+          ) : (
+            <p className="mb-4 text-xs leading-relaxed text-ink-dim">
+              Books the on-site assessment on this client&apos;s open request and sends them a confirmation by text and email.
+            </p>
+          )}
+          <ScheduleVisitForm clientId={client.id} crew={crew} kinds={["assessment"]} />
+        </Panel>
+      </section>
 
       <section className="mb-6">
         <Correspondence client={client} />

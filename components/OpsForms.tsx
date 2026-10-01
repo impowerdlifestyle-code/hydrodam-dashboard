@@ -67,13 +67,13 @@ function CrewPicker({
 }
 
 export function ScheduleVisitForm({
-  jobId, requestId, crew, kinds,
+  jobId, requestId, clientId, crew, kinds,
 }: {
-  jobId?: string; requestId?: string; crew: Person[]; kinds: VisitKind[];
+  jobId?: string; requestId?: string; clientId?: string; crew: Person[]; kinds: VisitKind[];
 }) {
   const { run, pending, feedback } = useOps();
   const [start, setStart] = useState(defaultSlot());
-  const [minutes, setMinutes] = useState(240);
+  const [minutes, setMinutes] = useState(kinds[0] === "assessment" ? 60 : 240);
   const [kind, setKind] = useState<VisitKind>(kinds[0]);
   const [staff, setStaff] = useState<string[]>([]);
 
@@ -115,7 +115,9 @@ export function ScheduleVisitForm({
           run(
             jobId
               ? { kind: "job.visit", id: jobId, visitKind: kind, startISO: toISO(start), minutes, staffIds: staff }
-              : { kind: "request.schedule", id: requestId!, startISO: toISO(start), minutes, staffIds: staff }
+              : clientId
+                ? { kind: "client.schedule", clientId, startISO: toISO(start), minutes, staffIds: staff }
+                : { kind: "request.schedule", id: requestId!, startISO: toISO(start), minutes, staffIds: staff }
           )
         }
       >

@@ -13,7 +13,7 @@ import {
 } from "@/lib/db";
 import { specFor } from "@/lib/pricing";
 import { mintPortalLink, portalOrigin, revokePortalLinks } from "@/lib/portal";
-import { cancelAssessmentByOffice } from "@/lib/booking";
+import { bookAssessmentForClient, cancelAssessmentByOffice, confirmOfficeBooking } from "@/lib/booking";
 import { syncTransition } from "@/lib/crm-sync";
 import { requireSession } from "@/lib/session";
 import { logChange } from "@/lib/text-automations";
@@ -36,6 +36,7 @@ export type OpsInput =
   | { kind: "request.status"; id: string; status: RequestStatus }
   | { kind: "request.assign"; id: string; userId: string }
   | { kind: "request.schedule"; id: string; startISO: string; minutes: number; staffIds: string[] }
+  | { kind: "client.schedule"; clientId: string; startISO: string; minutes: number; staffIds: string[] }
   | { kind: "request.quote"; id: string; series: Series }
   | { kind: "quote.send"; id: string }
   | { kind: "quote.decline"; id: string }
@@ -199,10 +200,13 @@ async function dispatch(input: OpsInput): Promise<OpsResult> {
       return { ok: true, message: input.userId ? "Assigned." : "Unassigned." };
     }
 
+    case "client.schedule":
+      return bookAssessmentForClient(input);
+
     case "request.schedule": {
       if (!DB_LIVE) return { ok: false, message: NEEDS_DB };
       const before = getRequest(input.id);
-      const { requestId } = await realRequestId(input.id);
+      const { requestId, clientId } = await realRequestId(input.id);
       await createVisit({
         requestId,
         kind: "assessment",
@@ -214,7 +218,8 @@ async function dispatch(input: OpsInput): Promise<OpsResult> {
       if (before && before.status !== "assessment_scheduled") {
         await syncTransition({ entity: "request", from: before.status, to: "assessment_scheduled" }, contactFor(before.clientId));
       }
-      return { ok: true, message: "Assessment booked." };
+      confirmOfficeBooking(clientId, input.startISO, input.minutes);
+      return { ok: true, message: "Assessment booked. The customer gets a confirmation." };
     }
 
     case "request.quote": {
