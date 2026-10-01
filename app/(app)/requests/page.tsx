@@ -64,7 +64,7 @@ export default async function RequestsPage({
   searchParams: Promise<{ f?: string; q?: string; p?: string; o?: string; s?: string }>;
 }) {
   await ensureData();
-  const { f = "open", q = "", p = "1", o = "", s: sort = "priority" } = await searchParams;
+  const { f = "open", q = "", p = "1", o = "", s: sort = "newest" } = await searchParams;
   const filter = FILTERS.find((x) => x.key === f) ?? FILTERS[0];
   const crm = crmStatus();
   const me = await currentStaff();
@@ -93,7 +93,7 @@ export default async function RequestsPage({
   const pages = Math.max(1, Math.ceil(groups.length / PAGE_SIZE));
   const rows = groups.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const qs = (next: Record<string, string>) =>
-    `/requests?${new URLSearchParams({ f, ...(q ? { q } : {}), ...(o ? { o } : {}), ...(sort !== "priority" ? { s: sort } : {}), ...next }).toString()}`;
+    `/requests?${new URLSearchParams({ f, ...(q ? { q } : {}), ...(o ? { o } : {}), ...(sort !== "newest" ? { s: sort } : {}), ...next }).toString()}`;
 
   const people = groupByClient(all);
   const count = (statuses: string[]) => people.filter((g) => statuses.includes(g.lead.status)).length;
@@ -145,7 +145,7 @@ export default async function RequestsPage({
           </Link>
         )}
         <span className="ml-auto flex items-center gap-1 rounded-full p-0.5 ring-1 ring-line">
-          {[["priority", "Priority"], ["newest", "Newest"]].map(([key, label]) => (
+          {[["newest", "Newest"], ["priority", "Priority"]].map(([key, label]) => (
             <Link
               key={key}
               href={qs({ s: key, p: "1" })}
