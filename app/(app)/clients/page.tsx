@@ -46,6 +46,7 @@ export default async function ClientsPage({
   const paidRoster = paidClients().sort((a, b) => (b.paid?.at ?? "").localeCompare(a.paid?.at ?? ""));
   const paidTotal = paidRoster.reduce((s, c) => s + (c.paid?.amountCents ?? 0), 0);
   const consented = matched.filter((c) => c.smsConsent).length;
+  const marketingOk = matched.filter((c) => c.smsMarketingConsent).length;
   const addressed = crm.live ? crm.addressedCount ?? 0 : db().properties.length;
 
   return (
@@ -93,7 +94,7 @@ export default async function ClientsPage({
         <StatCard
           label="SMS consented"
           value={`${consented.toLocaleString()}/${matched.length.toLocaleString()}`}
-          sub={crm.live ? "HubSpot stores no consent record" : "TCPA wording stored per client"}
+          sub={crm.live ? "HubSpot stores no consent record" : `${marketingOk.toLocaleString()} also OK for marketing texts`}
           accent={consented === matched.length ? "good" : "warn"}
         />
       </div>

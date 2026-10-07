@@ -72,7 +72,7 @@ function context(): string {
     ).join("; ")
   );
 
-  const consented = d.clients.filter((c) => c.smsConsent);
+  const consented = d.clients.filter((c) => c.smsMarketingConsent && !c.smsOptOutAt);
   lines.push(
     `CONSENT: ${consented.length} of ${d.clients.length} clients have consented to marketing SMS` +
     (consented.length ? `: ${consented.slice(0, 30).map((c) => c.name).join(", ")}.` : ". Nobody else may be texted marketing.")

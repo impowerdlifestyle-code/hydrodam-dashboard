@@ -49,6 +49,9 @@ type Body = {
   smsConsent?: boolean;
   /** The exact wording shown next to the tick. Evidence, never paraphrased. */
   consentWording?: string;
+  /** The separate marketing box on the same form, with its own wording. */
+  smsMarketingConsent?: boolean;
+  marketingConsentWording?: string;
 };
 
 const OPENING_TYPES = new Set([
@@ -104,20 +107,25 @@ export async function POST(req: Request) {
       await addOpenings(company, propertyId, body.openings);
     }
 
-    // The tick grants BOTH channels, because the label the person read covers
-    // both: appointment and service updates as well as marketing. Writing only
-    // sms_marketing left every website opt-in with no transactional consent,
-    // which is the channel the send gate and the Inbox actually read.
-    if (body.smsConsent && phone && body.consentWording) {
+    // The form has two boxes since the carriers rejected one box covering
+    // service and marketing texts together (Twilio 30913). Each tick grants
+    // only its own channel, with the wording that sat next to that box.
+    const granted = phone
+      ? [
+          { channel: "sms_transactional", ticked: body.smsConsent, wording: body.consentWording },
+          { channel: "sms_marketing", ticked: body.smsMarketingConsent, wording: body.marketingConsentWording },
+        ].filter((g) => g.ticked && g.wording)
+      : [];
+    if (granted.length) {
       await pg.insert(
         "consents",
-        (["sms_transactional", "sms_marketing"] as const).map((channel) => ({
+        granted.map((g) => ({
           company_id: company,
           client_id: clientId,
           phone,
-          channel,
+          channel: g.channel,
           action: "granted",
-          wording: body.consentWording,
+          wording: g.wording,
           source,
           source_url: body.sourceUrl ?? null,
         }))

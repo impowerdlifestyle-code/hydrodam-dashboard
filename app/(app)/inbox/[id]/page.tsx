@@ -73,9 +73,12 @@ export default async function ThreadPage({ params }: { params: Promise<{ id: str
                 <Badge tone={client.smsConsent ? "good" : "bad"}>
                   {client.smsConsent ? "SMS consented" : "No SMS consent"}
                 </Badge>
+                <Badge tone={client.smsMarketingConsent ? "good" : "neutral"}>
+                  {client.smsMarketingConsent ? "Marketing texts OK" : "No marketing texts"}
+                </Badge>
                 <Badge tone="teal">{client.leadSource}</Badge>
               </div>
-              {!client.smsConsent && (
+              {!client.smsMarketingConsent && (
                 <p className="mt-3 text-xs text-ink-faint">
                   Marketing texts are blocked for this client. Transactional messages about a booked job still send.
                 </p>

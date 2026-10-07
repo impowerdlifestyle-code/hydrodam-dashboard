@@ -187,6 +187,9 @@ export default async function RequestDetail({ params }: { params: Promise<{ id: 
                 <Badge tone={client.smsConsent ? "good" : "neutral"}>
                   {client.smsConsent ? "SMS consented" : "No SMS consent"}
                 </Badge>
+                <Badge tone={client.smsMarketingConsent ? "good" : "neutral"}>
+                  {client.smsMarketingConsent ? "Marketing texts OK" : "No marketing texts"}
+                </Badge>
                 {client.tags.map((t) => <Badge key={t}>{t}</Badge>)}
               </div>
             </Panel>
