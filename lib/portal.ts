@@ -5,7 +5,7 @@ import * as pg from "@/lib/supabase";
 import { SUPABASE_LIVE } from "@/lib/supabase";
 import { db, ensureData, realClientId } from "@/lib/db";
 import { PASSWORD_MIN } from "@/lib/portal-password";
-import { p as para, sendEmail, shell } from "@/lib/mail";
+import { esc, p as para, sendEmail, shell } from "@/lib/mail";
 
 /**
  * Client portal links.
@@ -234,6 +234,8 @@ const KEY_BYTES = 64;
 
 export const RESET_WINDOW_MINUTES = 60;
 const PASSWORD_MAX_FAILS = 5;
+/** Across every email, so one password cannot be sprayed over the customer list. */
+const PASSWORD_MAX_FAILS_PER_IP = 20;
 
 type AccountRow = { client_id: string; email: string; password_hash: string };
 
@@ -261,6 +263,7 @@ async function accountFor(clientId: string): Promise<AccountRow | undefined> {
 }
 
 export type PortalGate = {
+  linkId: string;
   clientId: string;
   hasAccount: boolean;
   /** Minted recently enough that it may replace an existing password. */
@@ -281,6 +284,7 @@ export async function portalGate(token: string): Promise<PortalGate | null> {
   });
   if (!row || !live(row)) return null;
   return {
+    linkId: row.id,
     clientId: row.client_id,
     hasAccount: Boolean(await accountFor(row.client_id)),
     fresh: Date.now() - Date.parse(row.created_at) < RESET_WINDOW_MINUTES * 60_000,
@@ -303,31 +307,60 @@ export async function setPortalPassword(
   if (gate.hasAccount && !gate.fresh) return { ok: false, reason: "stale" };
   if (password.length < PASSWORD_MIN || password.length > 200) return { ok: false, reason: "weak" };
 
-  const now = new Date().toISOString();
-  if (gate.hasAccount) {
-    await pg.patch("portal_accounts", { client_id: `eq.${gate.clientId}` }, {
-      password_hash: await hashPassword(password),
-      updated_at: now,
-    });
-    return { ok: true };
-  }
-
   await ensureData();
   let client = db().clients.find((c) => c.id === gate.clientId);
   if (!client) {
     await ensureData({ fresh: true });
     client = db().clients.find((c) => c.id === gate.clientId);
   }
-  const email = (client?.email || rawEmail || "").trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, reason: "email" };
+  const onFile = client?.email?.trim().toLowerCase();
 
-  await pg.insert("portal_accounts", {
-    client_id: gate.clientId,
-    company_id: await pg.rpc<string>("company_id", {}),
-    email,
-    password_hash: await hashPassword(password),
-    last_login_at: now,
-  }, { onConflict: "client_id" });
+  const now = new Date().toISOString();
+  if (gate.hasAccount) {
+    await pg.patch("portal_accounts", { client_id: `eq.${gate.clientId}` }, {
+      password_hash: await hashPassword(password),
+      updated_at: now,
+      // The office may have corrected the address since the account was made,
+      // and sign-in looks the account up by this column.
+      ...(onFile ? { email: onFile } : {}),
+    });
+  } else {
+    const email = (onFile || rawEmail || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, reason: "email" };
+
+    await pg.insert("portal_accounts", {
+      client_id: gate.clientId,
+      company_id: await pg.rpc<string>("company_id", {}),
+      email,
+      password_hash: await hashPassword(password),
+      last_login_at: now,
+    }, { onConflict: "client_id" });
+  }
+
+  // Whoever sets the password keeps the link they used and nothing else: any
+  // other copy of an older link, forwarded or left on a shared computer, stops
+  // working, and the address on file hears about it either way.
+  await pg.patch("portal_links", { client_id: `eq.${gate.clientId}`, id: `neq.${gate.linkId}`, revoked_at: "is.null" }, {
+    revoked_at: now,
+  });
+  if (onFile) {
+    const firstName = client!.name.trim().split(/\s+/)[0] || "there";
+    await sendEmail({
+      to: onFile,
+      clientId: gate.clientId,
+      subject: gate.hasAccount ? "Your HydroDam password was changed" : "Your HydroDam account is set up",
+      html: shell({
+        heading: gate.hasAccount ? "Your password was changed" : "Your account is set up",
+        body:
+          para(`Hi ${esc(firstName)},`) +
+          para(gate.hasAccount
+            ? "The password on your HydroDam customer account was just changed."
+            : "A password was just chosen for your HydroDam customer account. You can now sign in with your email and that password any time.") +
+          para("If this was you, there is nothing else to do. If it was not, call us on (727) 613-1415 and we will lock the account straight away."),
+        cta: { label: "Sign in", href: `${portalOrigin()}/p/login` },
+      }),
+    }).catch((err) => console.warn("[portal] password notice not sent", err));
+  }
   return { ok: true };
 }
 
@@ -354,6 +387,17 @@ export async function passwordLogin(
     limit: String(PASSWORD_MAX_FAILS + 1),
   });
   if (fails.length >= PASSWORD_MAX_FAILS) return { reason: "rate_limited" };
+  if (audit.ip) {
+    const fromHere = await pg.select<{ id: number }>("portal_login_requests", {
+      select: "id",
+      ip_address: `eq.${audit.ip}`,
+      kind: "eq.password",
+      matched: "eq.false",
+      created_at: `gte.${since}`,
+      limit: String(PASSWORD_MAX_FAILS_PER_IP + 1),
+    });
+    if (fromHere.length >= PASSWORD_MAX_FAILS_PER_IP) return { reason: "rate_limited" };
+  }
 
   const accounts = await pg.select<AccountRow>("portal_accounts", {
     select: "client_id,email,password_hash",
