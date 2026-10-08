@@ -10,7 +10,8 @@ import { NextResponse, type NextRequest } from "next/server";
  * silently drop coverage. Anything that reads or writes real data re-checks.
  *
  * The client portal (/p/:token) is deliberately public — the token in the URL
- * is the credential, verified in the route itself. The Telnyx webhook is public
+ * is the credential, verified in the route itself, and the customer's own
+ * password at /p/login is how they get a fresh one. The Telnyx webhook is public
  * for the same reason: its credential is the Ed25519 signature, which the route
  * checks before it reads a single field.
  */

@@ -9,7 +9,8 @@ import { bookAssessment, cancelAssessment, type BookInput } from "@/lib/booking"
 import { syncTransition } from "@/lib/crm-sync";
 import { DB_LIVE, ensureData, getClient, invalidate } from "@/lib/db";
 import { esc, p, sendEmail, shell, teamRecipients } from "@/lib/mail";
-import { portalOrigin, resolvePortalToken } from "@/lib/portal";
+import { portalOrigin, resolvePortalToken, setPortalPassword } from "@/lib/portal";
+import { PASSWORD_MIN } from "@/lib/portal-password";
 import { qbEstimateById, qbMarkAccepted } from "@/lib/quickbooks";
 import * as pg from "@/lib/supabase";
 import { toE164 } from "@/lib/telnyx";
@@ -31,6 +32,21 @@ async function clientFor(token: string, path: string): Promise<{ clientId: strin
 }
 
 const EXPIRED: Result = { ok: false, message: "This link has expired. Ask HydroDam for a new one." };
+
+export async function savePortalPassword(token: string, password: string, email?: string): Promise<Result> {
+  if (!DB_LIVE) return { ok: false, message: "Not available yet." };
+  const result = await setPortalPassword(token, password, email);
+  if (result.ok) {
+    revalidatePath(`/p/${token}`, "layout");
+    return { ok: true, message: "Your password is saved." };
+  }
+  if (result.reason === "weak") return { ok: false, message: `Please use at least ${PASSWORD_MIN} characters.` };
+  if (result.reason === "email") return { ok: false, message: "Please enter your email address." };
+  if (result.reason === "stale") {
+    return { ok: false, message: "For your security, changing a password needs a fresh link. Ask for one from the sign-in page." };
+  }
+  return EXPIRED;
+}
 
 export async function bookFromPortal(token: string, input: BookInput): Promise<Result> {
   if (!DB_LIVE) return { ok: false, message: "Not available yet." };

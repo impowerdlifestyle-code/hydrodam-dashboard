@@ -10,8 +10,9 @@ export default async function PortalLoginPage({ searchParams }: { searchParams: 
     <PortalFrame>
       <h1 className="mt-8 font-display text-2xl font-bold text-ink sm:text-3xl">Your HydroDam project</h1>
       <p className="mt-1.5 text-sm leading-relaxed text-ink-dim">
-        Enter the email you gave us and we will send you a private link. It opens your project: where things stand,
-        your assessment booking, your estimate and your documents.
+        Sign in with your email and password to see where things stand, your assessment booking, your estimate
+        and your documents. If this is your first visit, enter the email you gave us and we will send a link to set
+        up your account.
       </p>
       <PortalLoginForm initialEmail={email ?? ""} />
       <p className="mt-6 text-xs leading-relaxed text-ink-faint">
