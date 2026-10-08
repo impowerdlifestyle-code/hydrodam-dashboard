@@ -116,6 +116,9 @@ export async function POST(req: Request) {
           { channel: "sms_marketing", ticked: body.smsMarketingConsent, wording: body.marketingConsentWording },
         ].filter((g) => g.ticked && g.wording)
       : [];
+    if (phone && (body.smsConsent || body.smsMarketingConsent) && granted.length < Number(!!body.smsConsent) + Number(!!body.smsMarketingConsent)) {
+      console.warn("[intake] a consent tick arrived without its wording and was not recorded", { source });
+    }
     if (granted.length) {
       await pg.insert(
         "consents",
@@ -153,8 +156,9 @@ export async function POST(req: Request) {
     // The acknowledgement goes out now rather than on tomorrow's cron — a lead
     // that submits at 9am should not hear nothing until the next sweep. Claiming
     // the speed_to_lead dedupe key here is what stops the cron sending it twice.
-    if (request?.id && (email || (body.smsConsent && phone))) {
-      await claimSpeedToLead(company, clientId, request.id, body.smsConsent && phone ? "sms" : "email");
+    const canText = granted.some((g) => g.channel === "sms_transactional");
+    if (request?.id && (email || canText)) {
+      await claimSpeedToLead(company, clientId, request.id, canText ? "sms" : "email");
     }
 
     // The lead's own door into the portal. Minted here so the very first email
@@ -173,7 +177,7 @@ export async function POST(req: Request) {
 
     // They ticked the text box a moment ago, so text them. textClient re-checks
     // consent, the carrier route and quiet hours itself.
-    if (body.smsConsent && phone) {
+    if (canText && phone) {
       const ctx = {
         firstName: (body.name ?? "").trim().split(/\s+/)[0] || "there",
         companyPhone: "(727) 613-1415",

@@ -94,7 +94,7 @@ export default async function ClientsPage({
         <StatCard
           label="SMS consented"
           value={`${consented.toLocaleString()}/${matched.length.toLocaleString()}`}
-          sub={crm.live ? "HubSpot stores no consent record" : `${marketingOk.toLocaleString()} also OK for marketing texts`}
+          sub={`${marketingOk.toLocaleString()} also OK for marketing texts`}
           accent={consented === matched.length ? "good" : "warn"}
         />
       </div>

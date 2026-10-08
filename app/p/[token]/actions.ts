@@ -143,7 +143,7 @@ export async function acceptEstimateFromPortal(
     try {
       await pg.insert(
         "consents",
-        (["sms_transactional", "sms_marketing"] as const).map((channel) => ({
+        (["sms_transactional"] as const).map((channel) => ({
           company_id: company,
           client_id: who.clientId,
           phone: toE164(phone),

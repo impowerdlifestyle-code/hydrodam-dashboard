@@ -111,6 +111,9 @@ export async function revokePortalLinks(clientId: string): Promise<void> {
   await pg.patch("portal_links", { client_id: `eq.${clientId}`, revoked_at: "is.null" }, {
     revoked_at: new Date().toISOString(),
   });
+  // A password mints a fresh link on every sign-in, so revoking the links
+  // alone would leave the way back in standing.
+  await pg.remove("portal_accounts", { client_id: `eq.${clientId}` });
 }
 
 async function log(

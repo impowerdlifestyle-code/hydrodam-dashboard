@@ -80,7 +80,7 @@ export async function approveFromPortal(
       if (co) {
         await pg.insert(
           "consents",
-          (["sms_transactional", "sms_marketing"] as const).map((channel) => ({
+          (["sms_transactional"] as const).map((channel) => ({
             company_id: co.company_id,
             client_id: link.clientId,
             phone: toE164(phone),
