@@ -24,6 +24,8 @@ import type { Automation } from "@/lib/types";
 type Meta = {
   what: string;
   who: string;
+  /** For a flow an event fires rather than the morning run. */
+  when?: string;
   /** What the day offsets count from, in words. Absent when the flow has no delay. */
   anchor?: string;
   /** Whether negative offsets make sense (before the anchor). */
@@ -36,6 +38,7 @@ type Meta = {
 };
 
 const BASE = ["first_name", "company_phone"];
+const VISIT = ["visit_kind", "visit_day", "visit_date", "visit_window", "address", "crew_name"];
 
 const META: Record<string, Meta> = {
   speed_to_lead: {
@@ -44,24 +47,25 @@ const META: Record<string, Meta> = {
     anchor: "the day the request came in",
     after: true,
     tokens: BASE,
-    starter: "Hi {{first_name}}, HydroDam here. We have your flood barrier enquiry and will call within one business day to book your free assessment. Questions? {{company_phone}}",
+    starter: "Hi {{first_name}}, HydroDam here. We got your flood barrier request and will call within one business day to book your free assessment. Questions? Call {{company_phone}}.",
     wired: true,
   },
   reminder_24h: {
-    what: "A reminder about a visit that is on the calendar.",
+    what: "A reminder about a visit that is on the calendar, with what it is, the date and time, the address and who is coming.",
     who: "Customers with a scheduled or confirmed visit.",
     anchor: "the day of the visit",
     before: true,
-    tokens: [...BASE, "visit_window", "address"],
-    starter: "HydroDam reminder: we're with you tomorrow {{visit_window}}. Please clear access to the openings. Need to move it? {{company_phone}}",
+    tokens: [...BASE, ...VISIT],
+    starter: "Hi {{first_name}}, HydroDam here. Your {{visit_kind}} is {{visit_day}}, {{visit_date}}, {{visit_window}} at {{address}}. {{crew_name}} will be there. Need to move it? Call {{company_phone}}.",
     wired: true,
   },
   on_my_way: {
     what: "Tells the customer the crew is on the way.",
     who: "The customer on a visit when the crew heads out.",
-    tokens: BASE,
-    starter: "HydroDam: your crew is on the way to you now. {{company_phone}}",
-    wired: false,
+    when: "Straight away when the crew taps I'm on my way. Outside 8am to 9pm it is skipped, not saved for later.",
+    tokens: [...BASE, "crew_name", "address", "visit_kind"],
+    starter: "Hi {{first_name}}, your HydroDam crew is on the way to {{address}} for your {{visit_kind}}. Call {{company_phone}} if you need us.",
+    wired: true,
   },
   quote_followup: {
     what: "Checks in on a quote the customer has not answered.",
@@ -69,7 +73,7 @@ const META: Record<string, Meta> = {
     anchor: "the day the quote was sent",
     after: true,
     tokens: [...BASE, "quote_number", "quote_total"],
-    starter: "HydroDam: checking in on your quote #{{quote_number}}. Anything you'd like explained or adjusted? {{company_phone}}",
+    starter: "Hi {{first_name}}, HydroDam here, checking in on your quote #{{quote_number}}. If anything needs explaining or changing, reply here or call {{company_phone}}.",
     wired: true,
   },
   invoice_reminders: {
@@ -79,7 +83,7 @@ const META: Record<string, Meta> = {
     before: true,
     after: true,
     tokens: [...BASE, "invoice_number", "balance", "due_date", "days_overdue"],
-    starter: "HydroDam: invoice #{{invoice_number}} for {{balance}} is outstanding. Already paid? Let us know. {{company_phone}}",
+    starter: "Hi {{first_name}}, HydroDam here. Your invoice #{{invoice_number}} for {{balance}} is still open. If you have already paid, reply and let us know. Questions? Call {{company_phone}}.",
     wired: true,
   },
   review_request: {
@@ -88,14 +92,14 @@ const META: Record<string, Meta> = {
     anchor: "the day the job was closed",
     after: true,
     tokens: BASE,
-    starter: "HydroDam: hope you're happy with your barriers. A quick review helps your neighbours find us. Anything not right? Just reply.",
+    starter: "Hi {{first_name}}, HydroDam here. We hope you're happy with your barriers. A short review helps your neighbors find us: https://search.google.com/local/writereview?placeid=ChIJz4jfpxGKmaER_CXaCbjDOgU If anything isn't right, reply and tell us.",
     wired: true,
   },
   storm_surge: {
     what: "A storm alert telling customers to put their barriers up.",
     who: "Customers who agreed to marketing texts.",
     tokens: BASE,
-    starter: "HydroDam storm watch: deploy your barriers now, not the night before. Need a hand? {{company_phone}}",
+    starter: "HydroDam storm watch: a storm is in the forecast. Put your barriers up now instead of waiting for the night before. Need a hand? Call {{company_phone}}.",
     wired: false,
   },
 };
@@ -103,7 +107,7 @@ const META: Record<string, Meta> = {
 /** What a team-built automation's trigger means, and which fields it can fill. */
 const BY_TRIGGER: Record<string, Pick<Meta, "who" | "anchor" | "before" | "after" | "tokens">> = {
   "request.created": { who: "New leads with an open request.", anchor: "the day the request came in", after: true, tokens: BASE },
-  "visit.scheduled": { who: "Customers with a visit on the calendar.", anchor: "the day of the visit", before: true, tokens: [...BASE, "visit_window", "address"] },
+  "visit.scheduled": { who: "Customers with a visit on the calendar.", anchor: "the day of the visit", before: true, tokens: [...BASE, ...VISIT] },
   "quote.sent": { who: "Customers with an unanswered quote.", anchor: "the day the quote was sent", after: true, tokens: [...BASE, "quote_number", "quote_total"] },
   "invoice.sent": { who: "Customers with an unpaid invoice.", anchor: "the invoice due date", before: true, after: true, tokens: [...BASE, "invoice_number", "balance", "due_date", "days_overdue"] },
   "job.closed": { who: "Customers whose job has been closed.", anchor: "the day the job was closed", after: true, tokens: BASE },
@@ -117,7 +121,7 @@ const BUILT_IN: Record<string, { name: string; what: string; who: string; when: 
     who: "New website leads who ticked the box agreeing to texts.",
     when: "Straight away when the form is sent. Outside 8am to 9pm it is skipped, not saved for later.",
     tokens: [...BASE, "portal_url"],
-    starter: "Hi {{first_name}}, HydroDam here. We have your flood barrier enquiry and will call within one business day to book your free assessment. Or book online: {{portal_url}} Questions? {{company_phone}}",
+    starter: "Hi {{first_name}}, HydroDam here. We got your flood barrier request and will call within one business day to book your free assessment. Or pick a time online: {{portal_url}} Questions? Call {{company_phone}}.",
     sample: () => render("speed_to_lead", sampleCtx())?.sms ?? "",
   },
   appointment_confirm: {
@@ -126,7 +130,7 @@ const BUILT_IN: Record<string, { name: string; what: string; who: string; when: 
     who: "Customers who book their own assessment online.",
     when: "Straight away when they book. Outside 8am to 9pm it is skipped, not saved for later.",
     tokens: [...BASE, "visit_date", "visit_window", "address"],
-    starter: "HydroDam: you're booked for {{visit_date}}, {{visit_window}} at {{address}}. About an hour. Need to change it? {{company_phone}}",
+    starter: "Hi {{first_name}}, you're booked with HydroDam for {{visit_date}}, {{visit_window}} at {{address}}. The assessment takes about an hour. Need to change it? Call {{company_phone}}.",
     sample: () => bookingText(sampleCtx()),
   },
 };
@@ -137,6 +141,9 @@ export function sampleCtx(): TemplateContext {
     companyPhone: SAMPLE.company_phone,
     visitDate: SAMPLE.visit_date,
     visitWindow: SAMPLE.visit_window,
+    visitKind: SAMPLE.visit_kind,
+    visitDay: SAMPLE.visit_day,
+    crewName: SAMPLE.crew_name,
     address: SAMPLE.address,
     quoteNumber: Number(SAMPLE.quote_number),
     quoteTotalCents: 185_000,
@@ -150,7 +157,7 @@ export function sampleCtx(): TemplateContext {
 
 /** The booking confirmation as it has always read, when nobody has changed it. */
 export function bookingText(c: TemplateContext): string {
-  return `HydroDam: you're booked for ${c.visitDate ?? ""}${c.visitWindow ? `, ${c.visitWindow}` : ""}${c.address ? ` at ${c.address}` : ""}. About an hour. Need to change it? ${c.companyPhone}`;
+  return `Hi ${c.firstName}, you're booked with HydroDam for ${c.visitDate ?? ""}${c.visitWindow ? `, ${c.visitWindow}` : ""}${c.address ? ` at ${c.address}` : ""}. The assessment takes about an hour. Need to change it? Call ${c.companyPhone}.`;
 }
 
 // ------------------------------------------------------------------ catalog
@@ -201,7 +208,7 @@ export async function textFlows(): Promise<TextFlow[]> {
         automation: a,
         what: meta?.what ?? `A text the team set up in the Builder (${plain(a.name)}).`,
         who: meta?.who ?? trig?.who ?? "Customers this automation's trigger finds.",
-        when: meta && !meta.wired ? "Nothing in the app sends this yet." : describeTiming(a.offsetsDays, anchor),
+        when: meta && !meta.wired ? "Nothing in the app sends this yet." : (meta?.when ?? describeTiming(a.offsetsDays, anchor)),
         anchor,
         before: Boolean(meta ? meta.before : trig?.before),
         after: Boolean(meta ? meta.after : trig?.after),

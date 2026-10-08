@@ -2,7 +2,8 @@ import "server-only";
 import * as pg from "@/lib/supabase";
 import { SUPABASE_LIVE } from "@/lib/supabase";
 import { MAIL_LIVE, sendEmail } from "@/lib/mail";
-import { fill, render, renderCustom } from "@/lib/templates";
+import { VISIT_KIND_LABEL, fill, render, renderCustom, visitDayFor } from "@/lib/templates";
+import { portalOrigin } from "@/lib/portal";
 import { loadOverrides } from "@/lib/text-automations";
 import { withOptOutLine } from "@/lib/sms-wording";
 import { customAutomationTemplates } from "@/lib/builder";
@@ -125,7 +126,7 @@ async function candidatesFor(cfg: ConfigRow, epoch: string): Promise<Candidate[]
     c: ClientRow | null | undefined,
     anchorISO: string | null,
     entity: Candidate["entity"],
-    context: Record<string, unknown>,
+    context: Record<string, unknown> | ((offset: number) => Record<string, unknown>),
     label: string,
     keyPart: string
   ) => {
@@ -138,7 +139,7 @@ async function candidatesFor(cfg: ConfigRow, epoch: string): Promise<Candidate[]
         anchorDate,
         offset,
         entity,
-        context,
+        context: typeof context === "function" ? context(offset) : context,
         label,
       });
     }
@@ -179,10 +180,11 @@ async function candidatesFor(cfg: ConfigRow, epoch: string): Promise<Candidate[]
 
     case "reminder_24h": {
       const rows = await pg.select<{
-        id: string; scheduled_start: string | null; scheduled_end: string | null;
+        id: string; kind: string; scheduled_start: string | null; scheduled_end: string | null;
         clients: ClientRow | null; properties: { address_line1: string; city: string } | null;
+        visit_assignments: { is_lead: boolean; users: { full_name: string } | null }[];
       }>("visits", {
-        select: `id,scheduled_start,scheduled_end,clients(${CLIENT_COLS}),properties(address_line1,city)`,
+        select: `id,kind,scheduled_start,scheduled_end,clients(${CLIENT_COLS}),properties(address_line1,city),visit_assignments(is_lead,users(full_name))`,
         status: "in.(scheduled,confirmed)",
         scheduled_start: `gte.${epoch}`,
         order: "scheduled_start.asc",
@@ -190,14 +192,20 @@ async function candidatesFor(cfg: ConfigRow, epoch: string): Promise<Candidate[]
       });
       for (const v of rows) {
         if (!v.scheduled_start) continue;
+        const crew = v.visit_assignments.find((a) => a.is_lead) ?? v.visit_assignments[0];
+        const details = {
+          visitKind: VISIT_KIND_LABEL[v.kind] ?? "visit",
+          visitDate: dayLabel(v.scheduled_start),
+          visitWindow: windowLabel(v.scheduled_start, v.scheduled_end),
+          crewName: crew?.users?.full_name.trim().split(/\s+/)[0] || undefined,
+          address: v.properties ? `${v.properties.address_line1}, ${v.properties.city}` : undefined,
+          portalUrl: `${portalOrigin()}/p/login${v.clients?.email ? `?email=${encodeURIComponent(v.clients.email)}` : ""}`,
+        };
         push(
           v.clients,
           v.scheduled_start,
           { visitId: v.id },
-          {
-            visitWindow: windowLabel(v.scheduled_start, v.scheduled_end),
-            address: v.properties ? `${v.properties.address_line1}, ${v.properties.city}` : undefined,
-          },
+          (offset) => ({ ...details, visitDay: visitDayFor(offset) }),
           "visit reminder",
           `visit:${v.id}`
         );
@@ -327,6 +335,9 @@ const SEEDED = new Set(["speed_to_lead", "reminder_24h", "quote_followup", "invo
 function ruleFor(cfg: ConfigRow): string {
   return SEEDED.has(cfg.automation_id) ? cfg.automation_id : (RULE_BY_TRIGGER[cfg.trigger_event] ?? cfg.automation_id);
 }
+
+const dayLabel = (iso: string): string =>
+  new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric" }).format(new Date(iso));
 
 function windowLabel(startISO: string, endISO: string | null): string {
   const fmt = (iso: string) =>

@@ -1,7 +1,7 @@
 import "server-only";
 import { after } from "next/server";
 import {
-  createVisit, db, DB_LIVE, ensureData, getClient, getRequest, getVisit, invalidate, propertyFor, realClientId,
+  createVisit, db, DB_LIVE, ensureData, getClient, getRequest, getStaff, getVisit, invalidate, propertyFor, realClientId,
   realRequestId, saveProperty, updateRequest, updateVisit,
 } from "@/lib/db";
 import { syncTransition, unbookAssessment } from "@/lib/crm-sync";
@@ -10,6 +10,7 @@ import { esc, p, sendEmail, shell, teamRecipients } from "@/lib/mail";
 import { portalOrigin } from "@/lib/portal";
 import { textClient } from "@/lib/comms";
 import { bookingText, smsFor } from "@/lib/text-automations";
+import { VISIT_KIND_LABEL, render } from "@/lib/templates";
 import * as pg from "@/lib/supabase";
 import type { Visit } from "@/lib/types";
 
@@ -377,4 +378,36 @@ async function confirmToCustomer(clientId: string, startISO: string, endISO: str
       }),
     });
   }
+}
+
+/**
+ * The text a customer gets when the crew taps "I'm on my way". The office
+ * switch on the Automations page decides whether it sends, and the dedupe key
+ * means tapping twice texts once.
+ */
+export async function textOnMyWay(visitId: string): Promise<void> {
+  await ensureData();
+  const visit = getVisit(visitId);
+  const client = visit && getClient(visit.clientId);
+  if (!visit || !client?.phone) return;
+  if (!db().automations.find((a) => a.key === "on_my_way")?.armed) return;
+
+  const prop = db().properties.find((p) => p.id === visit.propertyId);
+  const ctx = {
+    firstName: client.name.split(" ")[0] || "there",
+    companyPhone: "(727) 613-1415",
+    crewName: getStaff(visit.assignedTo[0] ?? "")?.name.trim().split(/\s+/)[0],
+    visitKind: VISIT_KIND_LABEL[visit.kind],
+    address: prop ? `${prop.address}, ${prop.city}` : undefined,
+  };
+  const text = await smsFor("on_my_way", ctx, render("on_my_way", ctx)?.sms ?? "");
+  await textClient({
+    clientId: client.id,
+    phone: client.phone,
+    body: text,
+    templateKey: "on_my_way",
+    dedupeKey: `on_my_way:visit:${visit.id}`,
+  })
+    .then((r) => { if (!r.sent) console.info("[visit] on-my-way text not sent:", r.reason); })
+    .catch((err) => console.warn("[visit] on-my-way text failed", err));
 }

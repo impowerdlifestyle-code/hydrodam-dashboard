@@ -1,6 +1,7 @@
 "use server";
 
 import { headers } from "next/headers";
+import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { AGREEMENT_VERSION, ESIGN_CONSENT } from "@/lib/agreement";
 import {
@@ -13,7 +14,7 @@ import {
 } from "@/lib/db";
 import { specFor } from "@/lib/pricing";
 import { mintPortalLink, portalOrigin, revokePortalLinks } from "@/lib/portal";
-import { bookAssessmentForClient, cancelAssessmentByOffice, confirmOfficeBooking } from "@/lib/booking";
+import { bookAssessmentForClient, cancelAssessmentByOffice, confirmOfficeBooking, textOnMyWay } from "@/lib/booking";
 import { syncTransition } from "@/lib/crm-sync";
 import { requireSession } from "@/lib/session";
 import { logChange } from "@/lib/text-automations";
@@ -328,6 +329,7 @@ async function dispatch(input: OpsInput): Promise<OpsResult> {
       if (input.status === "in_progress") patch.checkedInAt = now;
       if (input.status === "completed") patch.completedAt = now;
       await updateVisit(input.id, patch);
+      if (input.status === "en_route" && DB_LIVE) after(() => textOnMyWay(input.id));
       return { ok: true, message: `Visit ${input.status.replace(/_/g, " ")}.` };
     }
 

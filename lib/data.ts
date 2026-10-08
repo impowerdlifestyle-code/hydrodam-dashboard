@@ -35,11 +35,11 @@ export const PORTAL_JOURNEY = ["Assessment", "Quote", "Approval", "Agreement", "
 
 export const MESSAGE_TEMPLATES = [
   { key: "speed_to_lead", name: "Speed to lead", channel: "sms", body: "Thanks for reaching out to HydroDam, {{first_name}}. {{owner_name}} will call you within the hour to book your free assessment." },
-  { key: "appointment_confirm", name: "Appointment confirmed", channel: "sms", body: "You're booked, {{first_name}} — {{visit_date}} between {{visit_window}}. Reply here if anything changes. — HydroDam" },
+  { key: "appointment_confirm", name: "Appointment confirmed", channel: "sms", body: "You're booked with HydroDam, {{first_name}}: {{visit_date}}, {{visit_window}}. Reply here if anything changes." },
   { key: "reminder_24h", name: "24-hour reminder", channel: "sms", body: "Reminder: HydroDam is out to you tomorrow, {{visit_date}} at {{visit_window}}. Reply C to confirm." },
-  { key: "on_my_way", name: "On my way", channel: "sms", body: "Good morning {{first_name}} — {{crew_name}} is on the way, ETA about {{eta}}. — HydroDam" },
+  { key: "on_my_way", name: "On my way", channel: "sms", body: "Good morning {{first_name}}, {{crew_name}} from HydroDam is on the way, ETA about {{eta}}." },
   { key: "quote_sent", name: "Quote ready", channel: "sms", body: "Hi {{first_name}}, your quote {{quote_number}} is ready to view: {{portal_url}}" },
-  { key: "quote_followup", name: "Quote follow-up", channel: "sms", body: "Hi {{first_name}} — following up on quote {{quote_number}}. Happy to walk through the options whenever suits. — HydroDam" },
+  { key: "quote_followup", name: "Quote follow-up", channel: "sms", body: "Hi {{first_name}}, HydroDam here, following up on quote {{quote_number}}. Happy to walk through the options whenever suits you." },
   { key: "invoice_sent", name: "Invoice sent", channel: "email", body: "Your invoice {{invoice_number}} for {{balance}} is ready. Pay by bank transfer or card: {{portal_url}}" },
   { key: "review_request", name: "Review request", channel: "sms", body: "Thanks again, {{first_name}}. If the install went well, a quick Google review helps us more than anything: {{review_url}}" },
 ] as const;
