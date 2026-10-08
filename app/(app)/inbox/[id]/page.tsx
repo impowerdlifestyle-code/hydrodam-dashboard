@@ -5,11 +5,21 @@ import { ReplyComposer } from "@/components/ReplyComposer";
 import { SmsThread } from "@/components/SmsThread";
 import { messageTemplates } from "@/lib/builder";
 import { clientOn, getConversation, markRead, messagesIn } from "@/lib/comms";
-import { propertyFor, smsGate, ensureData } from "@/lib/db";
-import { phoneDisplay, relative } from "@/lib/format";
+import { db, getStaff, propertyFor, quotesFor, smsGate, ensureData } from "@/lib/db";
+import { longDate, phoneDisplay, relative, timeRange } from "@/lib/format";
+import { portalOrigin } from "@/lib/portal";
+import { VISIT_KIND_LABEL, fill, type TemplateContext } from "@/lib/templates";
 import { TELNYX_LIVE } from "@/lib/telnyx";
 
 export const dynamic = "force-dynamic";
+
+/** Today's visit still counts until the day is over, so "on my way" has an address. */
+function upcomingVisit(clientId?: string) {
+  const since = Date.now() - 12 * 3_600_000;
+  return db().visits
+    .filter((v) => v.clientId === clientId && Date.parse(v.scheduledStart) > since)
+    .sort((a, b) => a.scheduledStart.localeCompare(b.scheduledStart))[0];
+}
 
 export default async function ThreadPage({ params }: { params: Promise<{ id: string }> }) {
   await ensureData();
@@ -32,6 +42,27 @@ export default async function ThreadPage({ params }: { params: Promise<{ id: str
 
   await markRead(conv.id);
 
+  // The quick replies are filled in here with this client's real details. One
+  // that needs a detail we do not have (no visit booked, no quote yet) is left
+  // out, so a customer is never sent a raw {{field}}.
+  const visit = upcomingVisit(conv.clientId);
+  const quote = quotesFor(conv.clientId ?? "").sort((a, b) => b.number - a.number)[0];
+  const ctx: TemplateContext = {
+    firstName: (client?.name ?? "").split(" ")[0] || "there",
+    companyPhone: "(727) 613-1415",
+    visitDate: visit ? longDate(visit.scheduledStart) : undefined,
+    visitWindow: visit ? timeRange(visit.scheduledStart, visit.scheduledEnd).replace(/\s*[\u2013\u2014]\s*/, " to ") : undefined,
+    visitKind: visit ? VISIT_KIND_LABEL[visit.kind] : undefined,
+    crewName: visit ? getStaff(visit.assignedTo[0] ?? "")?.name.trim().split(/\s+/)[0] : undefined,
+    address: prop ? `${prop.address}, ${prop.city}` : undefined,
+    quoteNumber: quote?.number,
+    portalUrl: client?.email ? `${portalOrigin()}/p/login?email=${encodeURIComponent(client.email)}` : undefined,
+  };
+  const quickReplies = (await messageTemplates())
+    .filter((t) => t.channel === "sms")
+    .filter((t) => [...t.body.matchAll(/\{\{\s*([a-z_]+)\s*\}\}/gi)].every((m) => fill(`x {{${m[1]}}}`, ctx) !== "x"))
+    .map(({ key, name, body }) => ({ key, name, body: fill(body, ctx) }));
+
   return (
     <>
       <Link href="/inbox" className="mb-4 inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-wider text-teal hover:underline">
@@ -51,8 +82,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ id: str
           <ReplyComposer
             conversationId={conv.id}
             blocked={blocked}
-            firstName={(client?.name ?? "").split(" ")[0] || "there"}
-            templates={(await messageTemplates()).filter((t) => t.channel === "sms").map(({ key, name, body }) => ({ key, name, body }))}
+            templates={quickReplies}
           />
         </Panel>
 
@@ -80,7 +110,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ id: str
               </div>
               {!client.smsMarketingConsent && (
                 <p className="mt-3 text-xs text-ink-faint">
-                  Marketing texts are blocked for this client. Transactional messages about a booked job still send.
+                  Marketing texts are blocked for this client.
                 </p>
               )}
             </Panel>

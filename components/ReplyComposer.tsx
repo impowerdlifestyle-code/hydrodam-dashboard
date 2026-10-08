@@ -11,12 +11,10 @@ import { segmentsFor } from "@/lib/format";
 export function ReplyComposer({
   conversationId,
   blocked,
-  firstName,
   templates = [],
 }: {
   conversationId: string;
   blocked?: string;
-  firstName: string;
   templates?: { key: string; name: string; body: string }[];
 }) {
   const [body, setBody] = useState("");
@@ -65,7 +63,7 @@ export function ReplyComposer({
           <button
             key={t.key}
             type="button"
-            onClick={() => setBody(t.body.replace(/\{\{first_name\}\}/g, firstName))}
+            onClick={() => setBody(t.body)}
             className="rounded-lg border border-line/60 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint transition-colors hover:border-line-bright hover:text-teal"
           >
             {t.name}

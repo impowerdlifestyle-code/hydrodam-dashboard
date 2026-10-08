@@ -240,8 +240,8 @@ export function fill(text: string, c: TemplateContext): string {
   // A field with no value takes its connecting word with it ("at {{address}}"),
   // and a sentence that opens on one ("{{crew_name}} will be there.") goes
   // entirely, so a missing detail never leaves "at ." or " will be there."
-  return text
-    .split(/(?<=[.?!])\s+/)
+  const line = (text: string) => text
+    .split(/(?<=[.?!])[ \t]+/)
     .filter((sentence) => {
       const lead = sentence.match(/^\{\{\s*([a-z_]+)\s*\}\}/i);
       return !lead || !blank(lead[1]);
@@ -257,6 +257,9 @@ export function fill(text: string, c: TemplateContext): string {
     .replace(/,([.?!])/g, "$1")
     .replace(/[ ]{2,}/g, " ")
     .trim();
+
+  // Line by line, so a paragraph break in an email body or a text survives.
+  return text.split("\n").map(line).join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /** An automation the team built in the dashboard: plain text with tokens, no code. */

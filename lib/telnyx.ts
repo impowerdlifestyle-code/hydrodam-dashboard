@@ -49,6 +49,7 @@ export const gsmSafe = (text: string): string =>
   text
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201C\u201D]/g, '"')
+    .replace(/(\d)\s*[\u2013\u2014]\s*(?=[$\d])/g, "$1-")
     .replace(/\s*[\u2013\u2014]\s*/g, ", ")
     .replace(/\u2026/g, "...")
     .replace(/[\u00A0\u2009\u202F]/g, " ");
@@ -56,6 +57,9 @@ export const gsmSafe = (text: string): string =>
 export async function sendSms(to: string, text: string): Promise<SendResult> {
   const apiKey = process.env.TELNYX_API_KEY;
   if (!apiKey) return { ok: false, error: "TELNYX_API_KEY is not set." };
+  // Last line of defence for every sender: a field nobody filled in must
+  // never reach a customer as literal curly brackets.
+  if (/\{\{[^{}]*\}\}/.test(text)) return { ok: false, error: "The text still has an unfilled {{field}} in it, so it was not sent." };
 
   const payload: Record<string, string> = { to: toE164(to), text: gsmSafe(text) };
   if (process.env.TELNYX_FROM) payload.from = process.env.TELNYX_FROM;

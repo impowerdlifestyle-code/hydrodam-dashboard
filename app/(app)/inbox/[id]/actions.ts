@@ -11,6 +11,9 @@ export async function sendReplyAction(
 ): Promise<{ ok: boolean; message: string }> {
   const text = body.trim();
   if (!text) return { ok: false, message: "Nothing to send." };
+  if (/\{\{[^{}]*\}\}/.test(text)) {
+    return { ok: false, message: "This text still has a blank field in curly brackets. Fill it in or remove it before sending." };
+  }
 
   const conv = await getConversation(conversationId);
   if (!conv) return { ok: false, message: "That thread no longer exists." };
